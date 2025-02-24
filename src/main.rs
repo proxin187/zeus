@@ -7,11 +7,13 @@ use core::arch::asm;
 use core::panic::PanicInfo;
 
 
+/*
 extern "C" {
     pub static __bss: *mut u8;
     pub static __bss_end: *mut u8;
     pub static __stack_top: *mut u8;
 }
+*/
 
 pub unsafe fn memset(buf: *mut u8, value: u8, count: usize) {
     for offset in 0..count {
@@ -21,7 +23,7 @@ pub unsafe fn memset(buf: *mut u8, value: u8, count: usize) {
 
 #[no_mangle]
 pub unsafe fn kmain() -> ! {
-    memset(__bss, 0, __bss_end as usize - __bss as usize);
+    // memset(__bss, 0, __bss_end as usize - __bss as usize);
 
     loop {}
 }
@@ -34,9 +36,9 @@ fn _panic(_info: &PanicInfo) -> ! {
 #[no_mangle]
 #[link_section = ".text.boot"]
 #[naked]
-pub unsafe extern "C" fn bootloader() {
+pub unsafe extern "C" fn boot() {
     asm!(
-        "la sp, __stack_top",
+        "li sp, 0x80200000",
         "j kmain",
         options(noreturn),
     );
