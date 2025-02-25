@@ -3,27 +3,23 @@
 
 #![feature(naked_functions)]
 
+mod drivers;
+
 use core::arch::asm;
 use core::panic::PanicInfo;
 
 
-/*
-extern "C" {
-    pub static __bss: *mut u8;
-    pub static __bss_end: *mut u8;
-    pub static __stack_top: *mut u8;
-}
-*/
-
 pub unsafe fn memset(buf: *mut u8, value: u8, count: usize) {
     for offset in 0..count {
-        (*buf.add(offset)) = value;
+        *buf.add(offset) = value;
     }
 }
 
 #[no_mangle]
 pub unsafe fn kmain() -> ! {
     // memset(__bss, 0, __bss_end as usize - __bss as usize);
+
+    drivers::init();
 
     loop {}
 }
@@ -38,8 +34,8 @@ fn _panic(_info: &PanicInfo) -> ! {
 #[naked]
 pub unsafe extern "C" fn boot() {
     asm!(
-        "li sp, 0x80200000",
-        "j kmain",
+        "la sp, __stack_top",
+        "tail kmain",
         options(noreturn),
     );
 }
