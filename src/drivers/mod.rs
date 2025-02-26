@@ -1,7 +1,23 @@
 mod uart;
 
+use core::fmt;
 
-pub fn init() {
+#[allow(static_mut_refs)]
+
+
+pub fn _log(args: fmt::Arguments) -> fmt::Result {
+    unsafe {
+        fmt::write(&mut uart::UART, args)
+    }
+}
+
+#[macro_export]
+macro_rules! log {
+    ($($arg:tt)*) => {
+        let _ = crate::drivers::_log(format_args!($($arg)*));
+
+        let _ = crate::drivers::_log(format_args!("\n"));
+    };
 }
 
 

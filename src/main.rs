@@ -3,6 +3,7 @@
 
 #![feature(naked_functions)]
 
+mod exception;
 mod drivers;
 
 use core::arch::asm;
@@ -19,7 +20,9 @@ pub unsafe fn memset(buf: *mut u8, value: u8, count: usize) {
 pub unsafe fn kmain() -> ! {
     // memset(__bss, 0, __bss_end as usize - __bss as usize);
 
-    drivers::init();
+    log!("initalizing kernel");
+
+    exception::init();
 
     loop {}
 }

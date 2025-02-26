@@ -1,3 +1,5 @@
+use core::fmt;
+
 
 #[link_section = ".rodata"]
 pub static mut UART: Uart = Uart::new();
@@ -8,18 +10,22 @@ pub struct Uart {
 }
 
 impl Uart {
-    pub const fn new() -> Uart {
+    const fn new() -> Uart {
         Uart {
             uart: 0x10000000 as *mut u8,
         }
     }
+}
 
-    pub fn write(&mut self, bytes: &[u8]) {
-        for byte in bytes {
+impl fmt::Write for Uart {
+    fn write_str(&mut self, string: &str) -> fmt::Result {
+        for byte in string.bytes() {
             unsafe {
-                *self.uart = *byte;
+                *UART.uart = byte;
             }
         }
+
+        Ok(())
     }
 }
 
