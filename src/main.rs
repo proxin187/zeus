@@ -5,6 +5,7 @@
 
 mod exception;
 mod drivers;
+mod cpu;
 
 use core::arch::asm;
 use core::panic::PanicInfo;

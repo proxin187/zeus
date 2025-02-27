@@ -1,6 +1,6 @@
 use core::arch::asm;
 
-use crate::log;
+use crate::{log, write_csr, read_csr};
 
 
 #[repr(packed, C)]
@@ -11,7 +11,11 @@ pub struct TrapFrame {
 
 #[no_mangle]
 pub unsafe extern "C" fn handle_trap(trap: &TrapFrame) {
-    log!("trap {:?}", trap);
+    let scause = read_csr!("scause", u64);
+    let stval = read_csr!("stval", u64);
+    let pc = read_csr!("sepc", u64);
+
+    log!("unexpected trap: {:?}, scause={}, stval={}, pc={}", trap, scause, stval, pc);
 }
 
 #[naked]
@@ -93,12 +97,7 @@ pub unsafe extern "C" fn handle_exception() {
 }
 
 pub fn init() {
-    unsafe {
-        asm!(
-            "csrw stvec, {value}",
-            value = in(reg) handle_exception,
-        );
-    }
+    write_csr!("stvec", handle_exception);
 
     log!("exception handler set");
 }
