@@ -5,11 +5,17 @@
 
 mod exception;
 mod drivers;
+mod memory;
 mod cpu;
 
 use core::arch::asm;
 use core::panic::PanicInfo;
+use core::ptr::addr_of;
 
+extern "C" {
+    static mut __bss: u8;
+    static mut __bss_end: u8;
+}
 
 pub unsafe fn memset(buf: *mut u8, value: u8, count: usize) {
     for offset in 0..count {
@@ -19,11 +25,13 @@ pub unsafe fn memset(buf: *mut u8, value: u8, count: usize) {
 
 #[no_mangle]
 pub unsafe fn kmain() -> ! {
-    // memset(__bss, 0, __bss_end as usize - __bss as usize);
+    memset(addr_of!(__bss) as *mut u8, 0, addr_of!(__bss_end) as usize - addr_of!(__bss) as usize);
 
     log!("initalizing kernel");
 
     exception::init();
+
+    memory::init();
 
     loop {}
 }
