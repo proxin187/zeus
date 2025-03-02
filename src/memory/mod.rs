@@ -3,7 +3,6 @@ use crate::log;
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::{self, addr_of};
 use core::mem;
-use core::slice;
 
 const CHUNK_LIMIT: usize = 999;
 
@@ -46,16 +45,26 @@ impl Allocator {
         }
     }
 
-    pub unsafe fn merge(&self) {
-        slice::sort::quicksort(self.chunks.as_mut_unchecked(), |a, b| a.base > b.base);
+    pub unsafe fn merge(&self) -> bool {
+        let mut merged = false;
 
-        for [a, b] in (*self.chunks).iter().enumerate().flat_map(|(a, _)| [a, a + 1]).array_chunks() {
-            if (*self.chunks)[a].base + (*self.chunks)[a].length == (*self.chunks)[b].base {
-                (*self.chunks)[a].length += (*self.chunks)[b].length;
+        for (a, _) in (*self.chunks).iter().enumerate().filter(|(_, chunk)| !chunk.is_empty()) {
+            for (b, _) in (*self.chunks).iter().enumerate().filter(|(_, chunk)| !chunk.is_empty()) {
+                if (*self.chunks)[a].base + (*self.chunks)[a].length == (*self.chunks)[b].base {
+                    (*self.chunks)[a].length += (*self.chunks)[b].length;
 
-                (*self.chunks)[b] = Chunk::new(0, 0);
+                    (*self.chunks)[b] = Chunk::new(0, 0);
+
+                    merged = true;
+                }
             }
         }
+
+        merged
+    }
+
+    pub fn defrag(&self) {
+        while unsafe { self.merge() } {}
     }
 }
 
@@ -83,7 +92,19 @@ unsafe impl GlobalAlloc for Allocator {
             },
         }
 
-        self.merge();
+        self.defrag();
+    }
+}
+
+pub fn dump() {
+    log!("dump chunks:");
+
+    unsafe {
+        let mut chunks = (*ALLOC.chunks).iter().filter(|chunk| !chunk.is_empty());
+
+        while let Some(chunk) = chunks.next() {
+            log!("chunk: {:?}", chunk);
+        }
     }
 }
 

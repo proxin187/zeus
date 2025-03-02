@@ -5,7 +5,6 @@
 
 #![feature(naked_functions)]
 #![feature(ptr_as_ref_unchecked)]
-#![feature(slice_internals)]
 #![feature(iter_array_chunks)]
 
 extern crate alloc;
@@ -18,7 +17,6 @@ mod cpu;
 use core::arch::asm;
 use core::panic::PanicInfo;
 use core::ptr::addr_of;
-use alloc::format;
 
 extern "C" {
     static mut __bss: u8;
@@ -40,10 +38,6 @@ pub unsafe fn kmain() -> ! {
     exception::init();
 
     memory::init();
-
-    {
-        let test = format!("string allocation");
-    }
 
     loop {}
 }
