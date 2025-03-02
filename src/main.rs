@@ -11,6 +11,7 @@ extern crate alloc;
 
 mod exception;
 mod drivers;
+mod process;
 mod memory;
 mod cpu;
 
