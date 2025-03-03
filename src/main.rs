@@ -38,6 +38,8 @@ pub unsafe fn kmain() -> ! {
 
     exception::init();
 
+    asm!("unimp");
+
     memory::init();
 
     loop {}

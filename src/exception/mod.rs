@@ -3,6 +3,59 @@ use core::arch::asm;
 use crate::{log, write_csr, read_csr};
 
 
+pub enum Interrupt {
+    MachineSoftware,
+    MachineTimer,
+    MachineExternal,
+    Unknown,
+}
+
+impl From<u64> for Interrupt {
+    fn from(scause: u64) -> Interrupt {
+        match scause & 0xfff {
+            3 => Interrupt::MachineSoftware,
+            7 => Interrupt::MachineTimer,
+            11 => Interrupt::MachineExternal,
+            _ => Interrupt::Unknown,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum Exception {
+    IllegalInstruction,
+    SyscallUser,
+    SyscallSupervisor,
+    SyscallMachine,
+    Unknown,
+}
+
+impl From<u64> for Exception {
+    fn from(scause: u64) -> Exception {
+        match scause & 0xfff {
+            2 => Exception::IllegalInstruction,
+            8 => Exception::SyscallUser,
+            9 => Exception::SyscallSupervisor,
+            11 => Exception::SyscallMachine,
+            _ => Exception::Unknown,
+        }
+    }
+}
+
+pub enum TrapKind {
+    Interrupt(Interrupt),
+    Exception(Exception),
+}
+
+impl From<u64> for TrapKind {
+    fn from(scause: u64) -> TrapKind {
+        match (scause >> 63) & 1 {
+            1 => TrapKind::Interrupt(Interrupt::from(scause)),
+            _ => TrapKind::Exception(Exception::from(scause)),
+        }
+    }
+}
+
 #[repr(packed, C)]
 #[derive(Debug)]
 pub struct TrapFrame {
@@ -15,11 +68,33 @@ pub unsafe extern "C" fn handle_trap(trap: &TrapFrame) {
     let stval = read_csr!("stval", u64);
     let pc = read_csr!("sepc", u64);
 
-    log!("unexpected trap: {:?}, scause={}, stval={}, pc={}", trap, scause, stval, pc);
+    log!("exception: {:?}, scause={}, stval={}, pc={}", trap, scause, stval, pc);
+
+    return;
+    match TrapKind::from(scause) {
+        TrapKind::Interrupt(interrupt) => match interrupt {
+            Interrupt::MachineSoftware => {
+                log!("machine software interrupt");
+            },
+            Interrupt::MachineTimer => {
+                log!("timer interrupt");
+            },
+            Interrupt::MachineExternal => {
+                log!("machine external interrupt");
+            },
+            Interrupt::Unknown => {
+                log!("unknown interrupt: scause={}, stval={}, pc={}", scause, stval, pc);
+            },
+        },
+        TrapKind::Exception(exception) => {
+            panic!("exception: {:?}, scause={}, stval={}, pc={}", exception, scause, stval, pc);
+        },
+    }
 }
 
 #[naked]
-pub unsafe extern "C" fn handle_exception() {
+pub unsafe extern "C" fn trap_entry() {
+    // TODO: this fails to return most likely because we are in 64bit but this is for 32bit
     asm!(
         "csrw sscratch, sp",
         "addi sp, sp, -4 * 31",
@@ -97,7 +172,7 @@ pub unsafe extern "C" fn handle_exception() {
 }
 
 pub fn init() {
-    write_csr!("stvec", handle_exception);
+    write_csr!("stvec", trap_entry);
 
     log!("exception handler set");
 }
