@@ -15,7 +15,7 @@ mod process;
 mod memory;
 mod cpu;
 
-use core::arch::asm;
+use core::arch::{naked_asm, asm};
 use core::panic::PanicInfo;
 use core::ptr::addr_of;
 
@@ -56,10 +56,9 @@ fn panic(info: &PanicInfo) -> ! {
 #[link_section = ".text.boot"]
 #[naked]
 pub unsafe extern "C" fn boot() {
-    asm!(
+    naked_asm!(
         "la sp, __stack_top",
         "tail kmain",
-        options(noreturn),
     );
 }
 

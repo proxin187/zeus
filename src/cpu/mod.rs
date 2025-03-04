@@ -7,7 +7,7 @@ macro_rules! read_csr {
         unsafe {
             let value: $type;
 
-            asm!(
+            core::arch::asm!(
                 concat!("csrr ", "{value}, ", $reg),
                 value = out(reg) value,
             );
@@ -21,7 +21,7 @@ macro_rules! read_csr {
 macro_rules! write_csr {
     ($reg:expr, $value:expr) => {
         unsafe {
-            asm!(
+            core::arch::asm!(
                 concat!("csrw ", $reg, ", {value}"),
                 value = in(reg) $value,
             );
