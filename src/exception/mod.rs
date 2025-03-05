@@ -1,6 +1,7 @@
-use core::arch::{naked_asm, asm};
-
 use crate::{log, write_csr, read_csr};
+use crate::cpu::sched::{MTIME, MTIMECMP};
+
+use core::arch::{naked_asm, asm};
 
 
 pub enum Interrupt {
@@ -11,8 +12,8 @@ pub enum Interrupt {
 }
 
 impl From<u64> for Interrupt {
-    fn from(scause: u64) -> Interrupt {
-        match scause & 0xfff {
+    fn from(mcause: u64) -> Interrupt {
+        match mcause & 0xfff {
             3 => Interrupt::MachineSoftware,
             7 => Interrupt::MachineTimer,
             11 => Interrupt::MachineExternal,
@@ -31,8 +32,8 @@ pub enum Exception {
 }
 
 impl From<u64> for Exception {
-    fn from(scause: u64) -> Exception {
-        match scause & 0xfff {
+    fn from(mcause: u64) -> Exception {
+        match mcause & 0xfff {
             2 => Exception::IllegalInstruction,
             8 => Exception::SyscallUser,
             9 => Exception::SyscallSupervisor,
@@ -48,10 +49,10 @@ pub enum TrapKind {
 }
 
 impl From<u64> for TrapKind {
-    fn from(scause: u64) -> TrapKind {
-        match (scause >> 63) & 1 {
-            1 => TrapKind::Interrupt(Interrupt::from(scause)),
-            _ => TrapKind::Exception(Exception::from(scause)),
+    fn from(mcause: u64) -> TrapKind {
+        match (mcause >> 63) & 1 {
+            1 => TrapKind::Interrupt(Interrupt::from(mcause)),
+            _ => TrapKind::Exception(Exception::from(mcause)),
         }
     }
 }
@@ -64,36 +65,36 @@ pub struct TrapFrame {
 
 #[no_mangle]
 pub unsafe extern "C" fn m_handle_trap() {
-    let scause = read_csr!("scause", u64);
-    let stval = read_csr!("stval", u64);
-    let pc = read_csr!("sepc", u64);
+    let mcause = read_csr!("mcause", u64);
+    let mtval = read_csr!("mtval", u64);
+    let mepc = read_csr!("mepc", u64);
 
-    match TrapKind::from(scause) {
+    match TrapKind::from(mcause) {
         TrapKind::Interrupt(interrupt) => match interrupt {
             Interrupt::MachineSoftware => {
                 log!("machine software interrupt");
             },
             Interrupt::MachineTimer => {
+                *MTIMECMP = *MTIME + 0xfffff * 5;
+
                 log!("timer interrupt");
             },
             Interrupt::MachineExternal => {
                 log!("machine external interrupt");
             },
             Interrupt::Unknown => {
-                log!("unknown interrupt: scause={}, stval={}, pc={}", scause, stval, pc);
+                log!("unknown interrupt: cause={}, tval={}, epc={}", mcause, mtval, mepc);
             },
         },
         TrapKind::Exception(exception) => {
-            // TODO: we might have to consider dropping opensbi as we really dont need it because
-            // it drops us into supervisor mode when it would be easier if we were just in machine
-            // mode
+            panic!("exception: {:?}, cause={}, tval={}, epc={}", exception, mcause, mtval, mepc);
 
-            log!("exception: {:?}, scause={}, stval={}, pc={}", exception, scause, stval, pc);
-
+            // the amount of bytes we need here depends on the instruction size, we could maybe
+            // only do this for syscalls
             asm!(
-                "csrr a0, sepc",
+                "csrr a0, mepc",
                 "addi a0, a0, 0x4",
-                "csrw sepc, a0",
+                "csrw mepc, a0",
             );
         },
     }
@@ -171,12 +172,12 @@ pub unsafe extern "C" fn trap_entry() {
 
         "addi sp, sp, 256",
 
-        "sret",
+        "mret",
     );
 }
 
 pub fn init() {
-    write_csr!("stvec", trap_entry);
+    write_csr!("mtvec", trap_entry);
 
     log!("exception handler set");
 }

@@ -1,4 +1,4 @@
-mod sched;
+pub mod sched;
 
 
 #[macro_export]

@@ -1,6 +1,6 @@
 
 
-pub struct Pcb {
+pub struct Process {
 }
 
 

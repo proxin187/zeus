@@ -15,6 +15,8 @@ mod process;
 mod memory;
 mod cpu;
 
+use cpu::sched;
+
 use core::arch::{naked_asm, asm};
 use core::panic::PanicInfo;
 use core::ptr::addr_of;
@@ -38,9 +40,9 @@ pub unsafe fn kmain() -> ! {
 
     exception::init();
 
-    asm!("unimp");
-
     memory::init();
+
+    sched::init();
 
     loop {}
 }
@@ -57,6 +59,12 @@ fn panic(info: &PanicInfo) -> ! {
 #[naked]
 pub unsafe extern "C" fn boot() {
     naked_asm!(
+        // enable global interrupts
+        "li t0, 0x1800",
+        "csrc mstatus, t0",
+        "li t0, 0x802",
+        "csrs mstatus, t0",
+
         "la sp, __stack_top",
         "tail kmain",
     );
