@@ -1,11 +1,29 @@
 use crate::{log, write_csr, read_csr};
-use crate::cpu::sched::{MTIME, MTIMECMP};
 
 use core::arch::{naked_asm, asm};
 
+const TIME_OFFSET: u64 = 10000000;
+
+
+macro_rules! reset_timer {
+    ($time:expr) => {
+        unsafe {
+            asm!(
+                "rdtime t0",
+                "li t1, {time}",
+                "add a0, t0, t1",
+                "li a7, 0x54494D45",
+                "li a6, 0x00",
+                "ecall",
+                time = const $time,
+            );
+        }
+    };
+}
 
 pub enum Interrupt {
     MachineSoftware,
+    SupervisorTimer,
     MachineTimer,
     MachineExternal,
     Unknown,
@@ -15,6 +33,7 @@ impl From<u64> for Interrupt {
     fn from(mcause: u64) -> Interrupt {
         match mcause & 0xfff {
             3 => Interrupt::MachineSoftware,
+            5 => Interrupt::SupervisorTimer,
             7 => Interrupt::MachineTimer,
             11 => Interrupt::MachineExternal,
             _ => Interrupt::Unknown,
@@ -64,30 +83,38 @@ pub struct TrapFrame {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn m_handle_trap() {
-    let mcause = read_csr!("mcause", u64);
-    let mtval = read_csr!("mtval", u64);
-    let mepc = read_csr!("mepc", u64);
+pub unsafe extern "C" fn s_handle_trap() {
+    let scause = read_csr!("scause", u64);
+    let stval = read_csr!("stval", u64);
+    let sepc = read_csr!("sepc", u64);
 
-    match TrapKind::from(mcause) {
+    match TrapKind::from(scause) {
         TrapKind::Interrupt(interrupt) => match interrupt {
             Interrupt::MachineSoftware => {
                 log!("machine software interrupt");
             },
-            Interrupt::MachineTimer => {
-                *MTIMECMP = *MTIME + 0xfffff * 5;
+            Interrupt::SupervisorTimer => {
+                reset_timer!(TIME_OFFSET);
 
-                log!("timer interrupt");
+                asm!(
+                    "li t0, 32",
+                    "csrc sip, t0",
+                );
+
+                log!("supervisor timer interrupt");
+            },
+            Interrupt::MachineTimer => {
+                log!("machine timer interrupt");
             },
             Interrupt::MachineExternal => {
                 log!("machine external interrupt");
             },
             Interrupt::Unknown => {
-                log!("unknown interrupt: cause={}, tval={}, epc={}", mcause, mtval, mepc);
+                log!("unknown interrupt: cause={}, tval={}, epc={}", scause, stval, sepc);
             },
         },
         TrapKind::Exception(exception) => {
-            panic!("exception: {:?}, cause={}, tval={}, epc={}", exception, mcause, mtval, mepc);
+            panic!("exception: {:?}, cause={}, tval={}, epc={}", exception, scause, stval, sepc);
 
             // the amount of bytes we need here depends on the instruction size, we could maybe
             // only do this for syscalls
@@ -137,7 +164,7 @@ pub unsafe extern "C" fn trap_entry() {
         "sd t5, 232(sp)",
         "sd t6, 240(sp)",
 
-        "call m_handle_trap",
+        "call s_handle_trap",
 
         "ld ra, 0(sp)",
         "ld sp, 8(sp)",
@@ -172,14 +199,27 @@ pub unsafe extern "C" fn trap_entry() {
 
         "addi sp, sp, 256",
 
-        "mret",
+        "sret",
     );
 }
 
 pub fn init() {
-    write_csr!("mtvec", trap_entry);
+    write_csr!("stvec", trap_entry);
 
-    log!("exception handler set");
+    unsafe {
+        asm!("csrsi sstatus, 2");
+    }
+
+    reset_timer!(TIME_OFFSET);
+
+    unsafe {
+        asm!(
+            "li t1, 32",
+            "csrs sie, t1",
+        );
+    }
+
+    log!("exception handler set and supervisor interrupt enabled");
 }
 
 

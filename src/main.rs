@@ -42,7 +42,7 @@ pub unsafe fn kmain() -> ! {
 
     memory::init();
 
-    sched::init();
+    // sched::init();
 
     loop {}
 }
@@ -59,14 +59,8 @@ fn panic(info: &PanicInfo) -> ! {
 #[naked]
 pub unsafe extern "C" fn boot() {
     naked_asm!(
-        // enable global interrupts
-        "li t0, 0x1800",
-        "csrc mstatus, t0",
-        "li t0, 0x802",
-        "csrs mstatus, t0",
-
         "la sp, __stack_top",
-        "tail kmain",
+        "call kmain",
     );
 }
 
