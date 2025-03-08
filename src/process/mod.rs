@@ -1,3 +1,5 @@
+use crate::exception::TrapFrame;
+
 use alloc::vec::Vec;
 
 use spin::Lazy;
@@ -7,14 +9,22 @@ pub static PROCESSES: Lazy<Processes> = Lazy::new(|| Processes::new());
 
 
 #[derive(Debug, Clone, Copy)]
+pub enum State {
+    Running,
+    Sleeping,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct Process {
-    sp: u64,
+    state: State,
+    frame: TrapFrame,
 }
 
 impl Process {
-    pub fn new(sp: u64) -> Process {
+    pub fn new(state: State, frame: TrapFrame) -> Process {
         Process {
-            sp,
+            state,
+            frame,
         }
     }
 }
@@ -30,7 +40,7 @@ impl Processes {
         }
     }
 
-    pub fn spawn(&mut self, entry: *const u8) {
+    pub fn spawn(&mut self, entry: u64) {
     }
 }
 

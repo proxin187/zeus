@@ -4,6 +4,9 @@ use core::arch::{naked_asm, asm};
 
 const TIME_OFFSET: u64 = 10000000;
 
+extern "C" {
+    static mut __trap_frame: u8;
+}
 
 macro_rules! reset_timer {
     ($time:expr) => {
@@ -77,9 +80,17 @@ impl From<u64> for TrapKind {
 }
 
 #[repr(packed, C)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct TrapFrame {
-    registers: [u64; 31],
+    regs: [u64; 32],
+}
+
+impl TrapFrame {
+    pub const fn new() -> TrapFrame {
+        TrapFrame {
+            regs: [0; 32],
+        }
+    }
 }
 
 #[no_mangle]
@@ -130,6 +141,47 @@ pub unsafe extern "C" fn s_handle_trap() {
 #[naked]
 pub unsafe extern "C" fn trap_entry() {
     naked_asm!(
+        "csrw sscratch, a0",
+
+        // TRAPFRAME needs to be the address that we load into
+        "la a0, __trap_frame",
+
+        "sd ra, 40(a0)",
+        "sd sp, 48(a0)",
+        "sd gp, 56(a0)",
+        "sd tp, 64(a0)",
+        "sd t0, 72(a0)",
+        "sd t1, 80(a0)",
+        "sd t2, 88(a0)",
+        "sd s0, 96(a0)",
+        "sd s1, 104(a0)",
+        "sd a1, 120(a0)",
+        "sd a2, 128(a0)",
+        "sd a3, 136(a0)",
+        "sd a4, 144(a0)",
+        "sd a5, 152(a0)",
+        "sd a6, 160(a0)",
+        "sd a7, 168(a0)",
+        "sd s2, 176(a0)",
+        "sd s3, 184(a0)",
+        "sd s4, 192(a0)",
+        "sd s5, 200(a0)",
+        "sd s6, 208(a0)",
+        "sd s7, 216(a0)",
+        "sd s8, 224(a0)",
+        "sd s9, 232(a0)",
+        "sd s10, 240(a0)",
+        "sd s11, 248(a0)",
+        "sd t3, 256(a0)",
+        "sd t4, 264(a0)",
+        "sd t5, 272(a0)",
+        "sd t6, 280(a0)",
+
+        // save the a0 register
+        "csrr t0, sscratch",
+        "sd t0, 112(a0)",
+
+        // this is the old code, it saves on the stack which is bad
         "addi sp, sp, -256",
 
         "sd ra, 0(sp)",
