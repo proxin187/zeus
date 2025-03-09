@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+#![allow(static_mut_refs)]
 #![allow(internal_features)]
 
 #![feature(naked_functions)]
@@ -15,9 +16,7 @@ mod process;
 mod memory;
 mod cpu;
 
-use cpu::sched;
-
-use core::arch::{naked_asm, asm};
+use core::arch::naked_asm;
 use core::panic::PanicInfo;
 use core::ptr::addr_of;
 
@@ -33,6 +32,25 @@ pub unsafe fn memset(buf: *mut u8, value: u8, count: usize) {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn proc1() {
+    /*
+    naked_asm!(
+        "add sp, sp, 20",
+        "add a0, a0, 1",
+        "add sp, sp, -20",
+
+        "j proc1",
+    );
+    */
+
+    loop {
+        log!("proc1 test");
+
+        for _ in 0..10000000 {}
+    }
+}
+
+#[no_mangle]
 pub unsafe fn kmain() -> ! {
     memset(addr_of!(__bss) as *mut u8, 0, addr_of!(__bss_end) as usize - addr_of!(__bss) as usize);
 
@@ -42,6 +60,8 @@ pub unsafe fn kmain() -> ! {
 
     memory::init();
 
+    process::spawn("init", proc1 as u64);
+
     exception::init_timer();
 
     loop {}
@@ -49,7 +69,7 @@ pub unsafe fn kmain() -> ! {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    log!("kernel panic: {:?}", info);
+    log!("kernel panic: {:#?}", info);
 
     loop {}
 }

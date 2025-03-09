@@ -45,6 +45,17 @@ impl Allocator {
         }
     }
 
+    pub unsafe fn push(&self, new: Chunk) {
+        match (*self.chunks).iter_mut().filter(|chunk| chunk.is_empty()).next() {
+            Some(chunk) => {
+                *chunk = new;
+            },
+            None => {
+                panic!("unable to push: out of chunks");
+            },
+        }
+    }
+
     pub unsafe fn merge(&self) -> bool {
         let mut merged = false;
 
@@ -63,16 +74,26 @@ impl Allocator {
         merged
     }
 
-    pub fn defrag(&self) {
+    pub unsafe fn defrag(&self) {
         while unsafe { self.merge() } {}
+    }
+
+    pub unsafe fn align(&self, chunk: &Chunk, align: u64, size: u64) {
+        if chunk.length - (chunk.length & !(align - 1)) > 0 {
+            self.push(Chunk::new(chunk.base as u64 + (chunk.length & !(align - 1)) + size, chunk.length - (chunk.length & !(align - 1))));
+        }
     }
 }
 
 unsafe impl GlobalAlloc for Allocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        match (*self.chunks).iter_mut().filter(|chunk| chunk.length > layout.size() as u64).next() {
+        match (*self.chunks).iter_mut().filter(|chunk| chunk.length > layout.size() as u64 + layout.align() as u64).next() {
             Some(chunk) => {
                 chunk.length -= layout.size() as u64;
+
+                self.align(&chunk, layout.align() as u64, layout.size() as u64);
+
+                chunk.length &= !(layout.align() as u64 - 1);
 
                 (chunk.base + chunk.length) as *mut u8
             },
@@ -83,14 +104,7 @@ unsafe impl GlobalAlloc for Allocator {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        match (*self.chunks).iter_mut().filter(|chunk| chunk.is_empty()).next() {
-            Some(chunk) => {
-                *chunk = Chunk::new(ptr as u64, layout.size() as u64);
-            },
-            None => {
-                panic!("unable to deallocate: out of chunks");
-            },
-        }
+        self.push(Chunk::new(ptr as u64, layout.size() as u64));
 
         self.defrag();
     }

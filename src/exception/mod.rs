@@ -1,3 +1,4 @@
+use crate::process::{self, Context};
 use crate::{log, write_csr, read_csr};
 
 use core::arch::{naked_asm, asm};
@@ -5,7 +6,7 @@ use core::arch::{naked_asm, asm};
 const TIME_OFFSET: u64 = 10000000;
 
 extern "C" {
-    static mut __trap_frame: u8;
+    static mut __trap_frame: TrapFrame;
 }
 
 macro_rules! reset_timer {
@@ -24,6 +25,7 @@ macro_rules! reset_timer {
     };
 }
 
+#[derive(Debug)]
 pub enum Interrupt {
     MachineSoftware,
     SupervisorTimer,
@@ -48,6 +50,8 @@ impl From<u64> for Interrupt {
 pub enum Exception {
     IllegalInstruction,
     SyscallUser,
+    LoadAddressMisaligned,
+    LoadAccessFault,
     SyscallSupervisor,
     SyscallMachine,
     Unknown,
@@ -57,6 +61,8 @@ impl From<u64> for Exception {
     fn from(mcause: u64) -> Exception {
         match mcause & 0xfff {
             2 => Exception::IllegalInstruction,
+            4 => Exception::LoadAddressMisaligned,
+            5 => Exception::LoadAccessFault,
             8 => Exception::SyscallUser,
             9 => Exception::SyscallSupervisor,
             11 => Exception::SyscallMachine,
@@ -65,6 +71,7 @@ impl From<u64> for Exception {
     }
 }
 
+#[derive(Debug)]
 pub enum TrapKind {
     Interrupt(Interrupt),
     Exception(Exception),
@@ -82,7 +89,7 @@ impl From<u64> for TrapKind {
 #[repr(packed, C)]
 #[derive(Debug, Clone, Copy)]
 pub struct TrapFrame {
-    regs: [u64; 32],
+    pub regs: [u64; 32],
 }
 
 impl TrapFrame {
@@ -94,14 +101,32 @@ impl TrapFrame {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn s_handle_trap(trapframe: &TrapFrame) {
-    let test = trapframe;
-
+pub unsafe extern "C" fn kernel_handle_trap() {
     let scause = read_csr!("scause", u64);
     let stval = read_csr!("stval", u64);
     let sepc = read_csr!("sepc", u64);
 
-    log!("test: {:?}", test);
+    log!("stval={:x?}, sepc={:x?}", stval, sepc);
+
+    panic!("unexpected kernel trap: {:?}", TrapKind::from(scause));
+}
+
+#[naked]
+pub unsafe extern "C" fn kernel_trap_entry() {
+    naked_asm!(
+        "call kernel_handle_trap",
+    );
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn user_handle_trap(trapframe: &TrapFrame) {
+    let scause = read_csr!("scause", u64);
+    let stval = read_csr!("stval", u64);
+    let sepc = read_csr!("sepc", u64);
+
+    write_csr!("stvec", kernel_trap_entry);
+
+    log!("trapframe: {:x?}", trapframe);
 
     match TrapKind::from(scause) {
         TrapKind::Interrupt(interrupt) => match interrupt {
@@ -109,10 +134,14 @@ pub unsafe extern "C" fn s_handle_trap(trapframe: &TrapFrame) {
                 log!("machine software interrupt");
             },
             Interrupt::SupervisorTimer => {
-                // here we will have to do a context switch
+                // TODO: some issues here lol
 
-                // it is important that we dont reset the timer before we are done with the context
-                // switch in order to not get an timer interrupt while inside the kernel
+                let context = process::schedule(Context::new(*trapframe, sepc));
+
+                __trap_frame = context.frame;
+
+                write_csr!("sepc", context.epc);
+
                 reset_timer!(TIME_OFFSET);
 
                 asm!(
@@ -120,7 +149,7 @@ pub unsafe extern "C" fn s_handle_trap(trapframe: &TrapFrame) {
                     "csrc sip, t0",
                 );
 
-                log!("supervisor timer interrupt");
+                log!("supervisor timer interrupt\n\n");
             },
             Interrupt::MachineTimer => {
                 log!("machine timer interrupt");
@@ -133,7 +162,7 @@ pub unsafe extern "C" fn s_handle_trap(trapframe: &TrapFrame) {
             },
         },
         TrapKind::Exception(exception) => {
-            panic!("exception: {:?}, cause={}, tval={}, epc={}", exception, scause, stval, sepc);
+            panic!("exception: {:?}, cause={:x?}, tval={:x?}, epc={:x?}", exception, scause, stval, sepc);
 
             // the amount of bytes we need here depends on the instruction size, we could maybe
             // only do this for syscalls
@@ -144,10 +173,12 @@ pub unsafe extern "C" fn s_handle_trap(trapframe: &TrapFrame) {
             );
         },
     }
+
+    write_csr!("stvec", user_trap_entry);
 }
 
 #[naked]
-pub unsafe extern "C" fn trap_entry() {
+pub unsafe extern "C" fn user_trap_entry() {
     naked_asm!(
         // save a0 into scratch register
         "csrw sscratch, a0",
@@ -197,12 +228,12 @@ pub unsafe extern "C" fn trap_entry() {
         "la sp, __kstack",
 
         // the trapframe address is already in a0 before calling
-        "call s_handle_trap",
+        "call user_handle_trap",
 
         // load address of our trapframe
         "la a0, __trap_frame",
 
-        // save registers into trapframe
+        // load trapframe into registers
         "ld ra, 0(a0)",
         "ld sp, 8(a0)",
         "ld gp, 16(a0)",
@@ -246,7 +277,7 @@ pub unsafe extern "C" fn trap_entry() {
 }
 
 pub fn init() {
-    write_csr!("stvec", trap_entry);
+    write_csr!("stvec", user_trap_entry);
 
     log!("exception handler initialized");
 }
