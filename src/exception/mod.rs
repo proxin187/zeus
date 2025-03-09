@@ -94,10 +94,14 @@ impl TrapFrame {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn s_handle_trap() {
+pub unsafe extern "C" fn s_handle_trap(trapframe: &TrapFrame) {
+    let test = trapframe;
+
     let scause = read_csr!("scause", u64);
     let stval = read_csr!("stval", u64);
     let sepc = read_csr!("sepc", u64);
+
+    log!("test: {:?}", test);
 
     match TrapKind::from(scause) {
         TrapKind::Interrupt(interrupt) => match interrupt {
@@ -105,6 +109,10 @@ pub unsafe extern "C" fn s_handle_trap() {
                 log!("machine software interrupt");
             },
             Interrupt::SupervisorTimer => {
+                // here we will have to do a context switch
+
+                // it is important that we dont reset the timer before we are done with the context
+                // switch in order to not get an timer interrupt while inside the kernel
                 reset_timer!(TIME_OFFSET);
 
                 asm!(
@@ -141,116 +149,98 @@ pub unsafe extern "C" fn s_handle_trap() {
 #[naked]
 pub unsafe extern "C" fn trap_entry() {
     naked_asm!(
+        // save a0 into scratch register
         "csrw sscratch, a0",
 
-        // TRAPFRAME needs to be the address that we load into
+        // load address of our trapframe
         "la a0, __trap_frame",
 
-        "sd ra, 40(a0)",
-        "sd sp, 48(a0)",
-        "sd gp, 56(a0)",
-        "sd tp, 64(a0)",
-        "sd t0, 72(a0)",
-        "sd t1, 80(a0)",
-        "sd t2, 88(a0)",
-        "sd s0, 96(a0)",
-        "sd s1, 104(a0)",
-        "sd a1, 120(a0)",
-        "sd a2, 128(a0)",
-        "sd a3, 136(a0)",
-        "sd a4, 144(a0)",
-        "sd a5, 152(a0)",
-        "sd a6, 160(a0)",
-        "sd a7, 168(a0)",
-        "sd s2, 176(a0)",
-        "sd s3, 184(a0)",
-        "sd s4, 192(a0)",
-        "sd s5, 200(a0)",
-        "sd s6, 208(a0)",
-        "sd s7, 216(a0)",
-        "sd s8, 224(a0)",
-        "sd s9, 232(a0)",
-        "sd s10, 240(a0)",
-        "sd s11, 248(a0)",
-        "sd t3, 256(a0)",
-        "sd t4, 264(a0)",
-        "sd t5, 272(a0)",
-        "sd t6, 280(a0)",
+        // save registers into trapframe
+        "sd ra, 0(a0)",
+        "sd sp, 8(a0)",
+        "sd gp, 16(a0)",
+        "sd tp, 24(a0)",
+        "sd t0, 32(a0)",
+        "sd t1, 40(a0)",
+        "sd t2, 48(a0)",
+        "sd s0, 56(a0)",
+        "sd s1, 64(a0)",
+
+        // we skip one here because this is where a0 is
+        "sd a1, 80(a0)",
+        "sd a2, 88(a0)",
+        "sd a3, 96(a0)",
+        "sd a4, 104(a0)",
+        "sd a5, 112(a0)",
+        "sd a6, 120(a0)",
+        "sd a7, 128(a0)",
+        "sd s2, 136(a0)",
+        "sd s3, 144(a0)",
+        "sd s4, 152(a0)",
+        "sd s5, 160(a0)",
+        "sd s6, 168(a0)",
+        "sd s7, 176(a0)",
+        "sd s8, 184(a0)",
+        "sd s9, 192(a0)",
+        "sd s10, 200(a0)",
+        "sd s11, 208(a0)",
+        "sd t3, 216(a0)",
+        "sd t4, 224(a0)",
+        "sd t5, 232(a0)",
+        "sd t6, 240(a0)",
 
         // save the a0 register
         "csrr t0, sscratch",
-        "sd t0, 112(a0)",
+        "sd t0, 72(a0)",
 
-        // this is the old code, it saves on the stack which is bad
-        "addi sp, sp, -256",
+        // load the kernel trap handling stack
+        "la sp, __kstack",
 
-        "sd ra, 0(sp)",
-        "sd sp, 8(sp)",
-        "sd gp, 16(sp)",
-        "sd tp, 24(sp)",
-        "sd t0, 32(sp)",
-        "sd t1, 40(sp)",
-        "sd t2, 48(sp)",
-        "sd s0, 56(sp)",
-        "sd s1, 64(sp)",
-        "sd a0, 72(sp)",
-        "sd a1, 80(sp)",
-        "sd a2, 88(sp)",
-        "sd a3, 96(sp)",
-        "sd a4, 104(sp)",
-        "sd a5, 112(sp)",
-        "sd a6, 120(sp)",
-        "sd a7, 128(sp)",
-        "sd s2, 136(sp)",
-        "sd s3, 144(sp)",
-        "sd s4, 152(sp)",
-        "sd s5, 160(sp)",
-        "sd s6, 168(sp)",
-        "sd s7, 176(sp)",
-        "sd s8, 184(sp)",
-        "sd s9, 192(sp)",
-        "sd s10, 200(sp)",
-        "sd s11, 208(sp)",
-        "sd t3, 216(sp)",
-        "sd t4, 224(sp)",
-        "sd t5, 232(sp)",
-        "sd t6, 240(sp)",
-
+        // the trapframe address is already in a0 before calling
         "call s_handle_trap",
 
-        "ld ra, 0(sp)",
-        "ld sp, 8(sp)",
-        "ld gp, 16(sp)",
-        "ld t0, 32(sp)",
-        "ld t1, 40(sp)",
-        "ld t2, 48(sp)",
-        "ld s0, 56(sp)",
-        "ld s1, 64(sp)",
-        "ld a0, 72(sp)",
-        "ld a1, 80(sp)",
-        "ld a2, 88(sp)",
-        "ld a3, 96(sp)",
-        "ld a4, 104(sp)",
-        "ld a5, 112(sp)",
-        "ld a6, 120(sp)",
-        "ld a7, 128(sp)",
-        "ld s2, 136(sp)",
-        "ld s3, 144(sp)",
-        "ld s4, 152(sp)",
-        "ld s5, 160(sp)",
-        "ld s6, 168(sp)",
-        "ld s7, 176(sp)",
-        "ld s8, 184(sp)",
-        "ld s9, 192(sp)",
-        "ld s10, 200(sp)",
-        "ld s11, 208(sp)",
-        "ld t3, 216(sp)",
-        "ld t4, 224(sp)",
-        "ld t5, 232(sp)",
-        "ld t6, 240(sp)",
+        // load address of our trapframe
+        "la a0, __trap_frame",
 
-        "addi sp, sp, 256",
+        // save registers into trapframe
+        "ld ra, 0(a0)",
+        "ld sp, 8(a0)",
+        "ld gp, 16(a0)",
+        "ld tp, 24(a0)",
+        "ld t0, 32(a0)",
+        "ld t1, 40(a0)",
+        "ld t2, 48(a0)",
+        "ld s0, 56(a0)",
+        "ld s1, 64(a0)",
 
+        // we skip one here because this is where a0 is
+        "ld a1, 80(a0)",
+        "ld a2, 88(a0)",
+        "ld a3, 96(a0)",
+        "ld a4, 104(a0)",
+        "ld a5, 112(a0)",
+        "ld a6, 120(a0)",
+        "ld a7, 128(a0)",
+        "ld s2, 136(a0)",
+        "ld s3, 144(a0)",
+        "ld s4, 152(a0)",
+        "ld s5, 160(a0)",
+        "ld s6, 168(a0)",
+        "ld s7, 176(a0)",
+        "ld s8, 184(a0)",
+        "ld s9, 192(a0)",
+        "ld s10, 200(a0)",
+        "ld s11, 208(a0)",
+        "ld t3, 216(a0)",
+        "ld t4, 224(a0)",
+        "ld t5, 232(a0)",
+        "ld t6, 240(a0)",
+
+        "ld a0, 72(a0)",
+
+        // sepc will be updated inside the traphandler and not here
+
+        // return to the program
         "sret",
     );
 }
@@ -258,6 +248,10 @@ pub unsafe extern "C" fn trap_entry() {
 pub fn init() {
     write_csr!("stvec", trap_entry);
 
+    log!("exception handler initialized");
+}
+
+pub fn init_timer() {
     unsafe {
         asm!("csrsi sstatus, 2");
     }
@@ -271,7 +265,7 @@ pub fn init() {
         );
     }
 
-    log!("exception handler set and supervisor interrupt enabled");
+    log!("timer initialized");
 }
 
 

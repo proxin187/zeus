@@ -27,13 +27,21 @@ SECTIONS {
         *(.eh_frame);
     }
 
+    /* this stack is used on entry and when initializing modules inside the kernel (everything except traps) */
     . = ALIGN(4);
     . += 128 * 1024; /* 128KB */
     __stack_top = .;
 
+    /* this stack is used when handling a trap inside the kernel */
     . = ALIGN(4);
-    . += 512;
+    . += 128 * 1024; /* 128KB */
+    __kstack = .;
+
+    /* this is used to store the trapframe before entering the trap handler */
+    . = ALIGN(4);
     __trap_frame = .;
+    . += 512;
+    __trap_frame_end = .;
 
     . = ALIGN(4096);
     __ram = .;

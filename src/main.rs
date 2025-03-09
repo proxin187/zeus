@@ -42,7 +42,7 @@ pub unsafe fn kmain() -> ! {
 
     memory::init();
 
-    // sched::init();
+    exception::init_timer();
 
     loop {}
 }
