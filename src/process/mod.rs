@@ -102,7 +102,12 @@ pub fn spawn(name: &str, entry: u64) {
 }
 
 pub fn exit() {
+    log!("exiting..");
+
+    // TODO: we get a deadlock here
     PROCESSES.lock().exit();
+
+    log!("exited");
 }
 
 pub fn schedule(context: Context) -> Context {
