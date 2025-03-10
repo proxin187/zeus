@@ -75,22 +75,6 @@ impl Processes {
             self.processes[0].context = context;
 
             self.processes[0].state = State::Runable;
-
-            log!("processes addr: {:x?}", core::ptr::addr_of!(PROCESSES));
-            log!("name addr: {:x?}", self.processes[0].name.as_ptr());
-
-            // TODO: the kernel panics here
-            // the issue might be related to memory allocation, maybe we get overlapping
-            // allocations?
-            //
-            // nevermind, looks like we dont have permission to read the address where name is
-            // stored?
-            //
-            // the address is being changed from 0x8425fffc to 0x80218f8800000000 and is therefore
-            // invalid
-            //
-            // the data inside the static PROCESSES is being overwritten
-            log!("process context saved: {:?}", self.processes[0]);
         }
     }
 
@@ -99,24 +83,26 @@ impl Processes {
 
         self.processes[0].state = State::Running;
 
-        log!("next process loaded: {:?}", self.processes[0]);
-
         self.processes[0].context.clone()
+    }
+
+    pub fn exit(&mut self) {
+        self.processes.remove(0);
     }
 }
 
 pub fn spawn(name: &str, entry: u64) {
     let mut process = Process::new(name.to_string(), State::Runable, Context::new(TrapFrame::new(), entry), vec![0; 128 * 1024]);
 
-    // 0x8021f020
-    log!("processes addr: {:x?}", core::ptr::addr_of!(PROCESSES));
-    log!("name: {:?}, addr: {:x?}", process.name, process.name.as_ptr());
-
-    process.context.frame.regs[1] = process.stack.as_ptr() as u64;
+    process.context.frame.regs[1] = process.stack.as_ptr_range().end as u64;
 
     log!("spawn: {:?}", process);
 
     PROCESSES.lock().processes.push(process);
+}
+
+pub fn exit() {
+    PROCESSES.lock().exit();
 }
 
 pub fn schedule(context: Context) -> Context {

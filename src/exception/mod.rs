@@ -3,7 +3,7 @@ use crate::{log, write_csr, read_csr};
 
 use core::arch::{naked_asm, asm};
 
-const TIME_OFFSET: u64 = 10000000;
+const TIME_OFFSET: u64 = 100000;
 
 extern "C" {
     static mut __trap_frame: TrapFrame;
@@ -126,16 +126,12 @@ pub unsafe extern "C" fn user_handle_trap(trapframe: &TrapFrame) {
 
     write_csr!("stvec", kernel_trap_entry);
 
-    log!("trapframe: {:x?}", trapframe);
-
     match TrapKind::from(scause) {
         TrapKind::Interrupt(interrupt) => match interrupt {
             Interrupt::MachineSoftware => {
                 log!("machine software interrupt");
             },
             Interrupt::SupervisorTimer => {
-                // TODO: some issues here lol
-
                 let context = process::schedule(Context::new(*trapframe, sepc));
 
                 __trap_frame = context.frame;
@@ -148,8 +144,6 @@ pub unsafe extern "C" fn user_handle_trap(trapframe: &TrapFrame) {
                     "li t0, 32",
                     "csrc sip, t0",
                 );
-
-                log!("supervisor timer interrupt\n\n");
             },
             Interrupt::MachineTimer => {
                 log!("machine timer interrupt");
@@ -163,14 +157,6 @@ pub unsafe extern "C" fn user_handle_trap(trapframe: &TrapFrame) {
         },
         TrapKind::Exception(exception) => {
             panic!("exception: {:?}, cause={:x?}, tval={:x?}, epc={:x?}", exception, scause, stval, sepc);
-
-            // the amount of bytes we need here depends on the instruction size, we could maybe
-            // only do this for syscalls
-            asm!(
-                "csrr a0, mepc",
-                "addi a0, a0, 0x4",
-                "csrw mepc, a0",
-            );
         },
     }
 

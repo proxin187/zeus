@@ -13,6 +13,7 @@ extern crate alloc;
 mod exception;
 mod drivers;
 mod process;
+mod syscall;
 mod memory;
 mod cpu;
 
@@ -32,22 +33,21 @@ pub unsafe fn memset(buf: *mut u8, value: u8, count: usize) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn proc1() {
-    /*
-    naked_asm!(
-        "add sp, sp, 20",
-        "add a0, a0, 1",
-        "add sp, sp, -20",
+pub unsafe extern "C" fn init_proc() {
+    loop {}
+}
 
-        "j proc1",
+#[no_mangle]
+pub unsafe extern "C" fn proc2() {
+    core::arch::asm!(
+        "li a0, 2",
+        "li a7, 0x80200010",
+        "jalr a7",
     );
-    */
 
-    loop {
-        log!("proc1 test");
+    log!("exited but waiting");
 
-        for _ in 0..10000000 {}
-    }
+    loop {}
 }
 
 #[no_mangle]
@@ -60,7 +60,8 @@ pub unsafe fn kmain() -> ! {
 
     memory::init();
 
-    process::spawn("init", proc1 as u64);
+    process::spawn("init", init_proc as u64);
+    process::spawn("proc2", proc2 as u64);
 
     exception::init_timer();
 
