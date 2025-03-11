@@ -17,7 +17,7 @@ mod syscall;
 mod memory;
 mod cpu;
 
-use core::arch::naked_asm;
+use core::arch::{asm, naked_asm};
 use core::panic::PanicInfo;
 use core::ptr::addr_of;
 
@@ -34,15 +34,21 @@ pub unsafe fn memset(buf: *mut u8, value: u8, count: usize) {
 
 #[no_mangle]
 pub unsafe extern "C" fn init_proc() {
-    loop {}
+    loop {
+        log!("test");
+
+        for _ in 0..1000000 {}
+    }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn proc2() {
-    core::arch::asm!(
-        "li a0, 2",
-        "li a7, 0x80200010",
-        "jalr a7",
+    log!("exiting proc2");
+
+    asm!(
+        "li a0, 1",
+        "li a7, 93",
+        "ecall",
     );
 
     log!("exited but waiting");
@@ -63,7 +69,7 @@ pub unsafe fn kmain() -> ! {
     process::spawn("init", init_proc as u64);
     process::spawn("proc2", proc2 as u64);
 
-    exception::init_timer();
+    exception::enter_user();
 
     loop {}
 }

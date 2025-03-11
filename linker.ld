@@ -6,7 +6,6 @@ SECTIONS {
 
     .text :{
         KEEP(*(.text.boot));
-        KEEP(*(.text.syscall));
         *(.text .text.*);
     }
 

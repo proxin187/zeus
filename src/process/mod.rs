@@ -86,8 +86,12 @@ impl Processes {
         self.processes[0].context.clone()
     }
 
-    pub fn exit(&mut self) {
+    pub fn exit(&mut self) -> Context {
         self.processes.remove(0);
+
+        self.processes[0].state = State::Running;
+
+        self.processes[0].context.clone()
     }
 }
 
@@ -101,13 +105,8 @@ pub fn spawn(name: &str, entry: u64) {
     PROCESSES.lock().processes.push(process);
 }
 
-pub fn exit() {
-    log!("exiting..");
-
-    // TODO: we get a deadlock here
-    PROCESSES.lock().exit();
-
-    log!("exited");
+pub fn exit() -> Context {
+    PROCESSES.lock().exit()
 }
 
 pub fn schedule(context: Context) -> Context {

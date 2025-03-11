@@ -1,12 +1,12 @@
 use crate::process::{self, Context};
-use crate::{log, write_csr, read_csr};
+use crate::{syscall, log, write_csr, read_csr};
 
 use core::arch::{naked_asm, asm};
 
 const TIME_OFFSET: u64 = 100000;
 
 extern "C" {
-    static mut __trap_frame: TrapFrame;
+    pub static mut __trap_frame: TrapFrame;
 }
 
 macro_rules! reset_timer {
@@ -155,12 +155,33 @@ pub unsafe extern "C" fn user_handle_trap(trapframe: &TrapFrame) {
                 log!("unknown interrupt: cause={}, tval={}, epc={}", scause, stval, sepc);
             },
         },
-        TrapKind::Exception(exception) => {
-            panic!("exception: {:?}, cause={:x?}, tval={:x?}, epc={:x?}", exception, scause, stval, sepc);
+        TrapKind::Exception(exception) => match exception {
+            Exception::SyscallUser => {
+                syscall::syscall(trapframe);
+
+                asm!(
+                    "csrr a0, sepc",
+                    "addi a0, a0, 4",
+                    "csrw sepc, a0",
+                );
+            },
+            _ => {
+                panic!("exception: {:?}, cause={:x?}, tval={:x?}, epc={:x?}", exception, scause, stval, sepc);
+            },
         },
     }
 
     write_csr!("stvec", user_trap_entry);
+
+    let mut sstatus = read_csr!("sstatus", u64);
+
+    // enable user mode
+    sstatus &= !(1 << 8);
+
+    // enable interrupts in user mode
+    sstatus |= 1 << 5;
+
+    write_csr!("sstatus", sstatus);
 }
 
 #[naked]
@@ -263,12 +284,14 @@ pub unsafe extern "C" fn user_trap_entry() {
 }
 
 pub fn init() {
-    write_csr!("stvec", user_trap_entry);
+    write_csr!("stvec", kernel_trap_entry);
 
     log!("exception handler initialized");
 }
 
-pub fn init_timer() {
+pub fn enter_user() {
+    write_csr!("stvec", user_trap_entry);
+
     unsafe {
         asm!("csrsi sstatus, 2");
     }

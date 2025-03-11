@@ -1,6 +1,8 @@
-use crate::{log, process};
+use crate::exception::{__trap_frame, TrapFrame};
+use crate::{write_csr, log, process};
 
 
+#[derive(Debug)]
 pub enum Syscall {
     Write,
     Read,
@@ -12,24 +14,30 @@ impl From<u64> for Syscall {
         match value {
             0 => Syscall::Write,
             1 => Syscall::Read,
-            2 => Syscall::Exit,
+            93 => Syscall::Exit,
             _ => panic!("unknown syscall: {}", value),
         }
     }
 }
 
-#[no_mangle]
-#[link_section = ".text.syscall"]
-pub unsafe extern "C" fn syscall(a0: u64) {
-    match Syscall::from(a0) {
+pub fn syscall(trapframe: &TrapFrame) {
+    let syscall = Syscall::from(trapframe.regs[16]);
+
+    log!("syscall: {:?}", syscall);
+
+    match syscall {
         Syscall::Write => {
         },
         Syscall::Read => {
         },
         Syscall::Exit => {
-            log!("exiting");
+            let context = process::exit();
 
-            process::exit();
+            unsafe {
+                __trap_frame = context.frame;
+            }
+
+            write_csr!("sepc", context.epc - 4);
         },
     }
 }
