@@ -16,6 +16,7 @@ mod process;
 mod syscall;
 mod memory;
 mod cpu;
+mod fs;
 
 use core::arch::{asm, naked_asm};
 use core::panic::PanicInfo;
@@ -51,8 +52,6 @@ pub unsafe extern "C" fn proc2() {
         "ecall",
     );
 
-    log!("exited but waiting");
-
     loop {}
 }
 
@@ -65,6 +64,8 @@ pub unsafe fn kmain() -> ! {
     exception::init();
 
     memory::init();
+
+    drivers::init();
 
     process::spawn("init", init_proc as u64);
     process::spawn("proc2", proc2 as u64);
