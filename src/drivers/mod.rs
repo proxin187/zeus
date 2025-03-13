@@ -1,14 +1,10 @@
-mod virtio;
+pub mod virtio;
 mod uart;
 
 use core::fmt;
 
 #[allow(static_mut_refs)]
 
-
-pub fn init() {
-    virtio::init();
-}
 
 pub fn _print(args: fmt::Arguments) -> fmt::Result {
     unsafe {

@@ -65,7 +65,12 @@ pub unsafe fn kmain() -> ! {
 
     memory::init();
 
-    drivers::init();
+    {
+        // TODO: this is only to trigger the lazy initialization and should be removed when testing
+        // is done
+
+        let _lock = drivers::virtio::VIRTIO_BLK.lock();
+    }
 
     process::spawn("init", init_proc as u64);
     process::spawn("proc2", proc2 as u64);
