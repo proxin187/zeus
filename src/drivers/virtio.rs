@@ -6,6 +6,10 @@ use spin::{Lazy, Mutex};
 pub static VIRTIO_BLK: Lazy<Mutex<VirtioBlk>> = Lazy::new(|| VirtioBlk::new());
 
 
+pub enum Error {
+    OutOfBounds,
+}
+
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
 pub struct Descriptor {
@@ -61,6 +65,27 @@ impl Queue {
     }
 }
 
+#[repr(C)]
+pub struct Request {
+    _type: u32,
+    reserved: u32,
+    sector: u64,
+    data: [u8; 512],
+    status: u8,
+}
+
+impl Request {
+    pub fn new() -> Request {
+        Request {
+            _type: 0,
+            reserved: 0,
+            sector: 0,
+            data: [0; 512],
+            status: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum MmioOffset {
     Magic = 0x00,
@@ -87,6 +112,7 @@ pub struct VirtioBlk {
     addr: u64,
     capacity: u64,
     virtq: Queue,
+    req: Request,
 }
 
 impl VirtioBlk {
@@ -95,6 +121,7 @@ impl VirtioBlk {
             addr: 0x10001000,
             capacity: 0,
             virtq: Queue::new(),
+            req: Request::new(),
         };
 
         virtio_blk.init_virtblk();
@@ -119,6 +146,17 @@ impl VirtioBlk {
     #[inline]
     fn virtio_mask(&self, offset: MmioOffset, value: u32) {
         self.virtio_write(offset, self.virtio_read::<u32>(offset) | value);
+    }
+
+    fn read_blk(&mut self, sector: u64) -> Result<(), Error> {
+        if sector >= self.capacity / 512 {
+            Err(Error::OutOfBounds)
+        } else {
+            self.req.sector = sector;
+            self.req._type = 0;
+
+            Ok(())
+        }
     }
 
     fn init_virtq(&self) {
