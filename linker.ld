@@ -47,6 +47,9 @@ SECTIONS {
     __ram = .;
     . += 64 * 1024 * 1024; /* 64MB */
     __ram_end = .;
+
+    . = ALIGN(4K);
+    __virtq = .;
 }
 
 

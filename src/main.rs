@@ -65,12 +65,30 @@ pub unsafe fn kmain() -> ! {
 
     memory::init();
 
-    {
-        // TODO: this is only to trigger the lazy initialization and should be removed when testing
-        // is done
+    use virtio_drivers::device::blk::VirtIOBlk;
+    use virtio_drivers::transport::mmio::{MmioTransport, VirtIOHeader};
+    use core::ptr::NonNull;
 
-        let _lock = drivers::virtio::VIRTIO_BLK.lock();
-    }
+    // TODO: compare with example to see what we do wrong
+    let header = NonNull::new(0x10001000 as *mut VirtIOHeader).unwrap();
+
+    log!("transport");
+
+    let transport = MmioTransport::new(header, 0x1000).unwrap();
+
+    log!("blk");
+
+    let mut blk = VirtIOBlk::<drivers::virtio::HalImpl, _>::new(transport).unwrap();
+
+    let mut output = alloc::vec![0; 512];
+
+    log!("read");
+
+    blk.read_blocks(0, &mut output).unwrap();
+
+    let string = alloc::string::String::from_utf8(output);
+
+    log!("string: {:?}", string);
 
     process::spawn("init", init_proc as u64);
     process::spawn("proc2", proc2 as u64);
