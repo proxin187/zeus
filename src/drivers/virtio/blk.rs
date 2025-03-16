@@ -1,12 +1,9 @@
-// this file contains an old and broken virtio implementation, for now we are using a crate for
-// virtio instead.
+use super::{MmioOffset, Device};
 
+use crate::memory::AlignedAlloc;
 use crate::log;
 
-use spin::{Lazy, Mutex};
-
-
-pub static VIRTIO_BLK: Lazy<Mutex<VirtioBlk>> = Lazy::new(|| VirtioBlk::new());
+use alloc::boxed::Box;
 
 
 #[derive(Debug)]
@@ -110,21 +107,6 @@ impl Request {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum MmioOffset {
-    Magic = 0x00,
-    Version = 0x04,
-    Id = 0x08,
-    QueueSel = 0x30,
-    QueueNumMax = 0x34,
-    QueueNum = 0x38,
-    QueueAlign = 0x3c,
-    QueuePfn = 0x40,
-    QueueNotify = 0x50,
-    Status = 0x70,
-    Config = 0x100,
-}
-
 pub enum VirtioStatus {
     Ack = 1,
     Driver = 2,
@@ -148,45 +130,44 @@ impl Mode {
 }
 
 pub struct VirtioBlk {
-    addr: u64,
+    device: Device,
     capacity: u64,
 
-    // TODO: manually allocate so that its aligned with 4096
+    // virtq: Box<Queue, AlignedAlloc::<4096>>,
     virtq: Queue,
     req: Request,
 }
 
+impl core::fmt::Debug for VirtioBlk {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> Result<(), core::fmt::Error> {
+        f.write_str("VirtioBlk {\n")?;
+
+        f.write_fmt(format_args!("    device: {:x?},\n", self.device))?;
+        f.write_fmt(format_args!("    capacity: {:x?},\n", self.capacity))?;
+
+        f.write_str("    virtq: ...,\n")?;
+        f.write_str("    req: ...,\n")?;
+
+        f.write_str("}\n")?;
+
+        Ok(())
+    }
+}
+
 impl VirtioBlk {
-    pub fn new() -> Mutex<VirtioBlk> {
+    pub fn new(device: Device) -> VirtioBlk {
         let mut virtio_blk = VirtioBlk {
-            addr: 0x10001000,
+            device,
             capacity: 0,
+
+            // virtq: Box::new_in(Queue::new(), AlignedAlloc::<4096>),
             virtq: Queue::new(),
             req: Request::new(),
         };
 
         virtio_blk.init_virtblk();
 
-        Mutex::new(virtio_blk)
-    }
-
-    #[inline]
-    fn virtio_read<T>(&self, offset: MmioOffset) -> T {
-        unsafe {
-            ((self.addr + offset as u64) as *const T as *mut T).read_volatile()
-        }
-    }
-
-    #[inline]
-    fn virtio_write(&self, offset: MmioOffset, value: u32) {
-        unsafe {
-            ((self.addr + offset as u64) as *const u32 as *mut u32).write_volatile(value);
-        }
-    }
-
-    #[inline]
-    fn virtio_mask(&self, offset: MmioOffset, value: u32) {
-        self.virtio_write(offset, self.virtio_read::<u32>(offset) | value);
+        virtio_blk
     }
 
     fn notify(&mut self) {
@@ -194,7 +175,7 @@ impl VirtioBlk {
 
         self.virtq.avail.index = self.virtq.avail.index.wrapping_add(1);
 
-        self.virtio_write(MmioOffset::QueueNotify, 0);
+        self.device.virtio_write(MmioOffset::QueueNotify, 0);
 
         self.virtq.last_used = self.virtq.last_used.wrapping_add(1);
     }
@@ -264,49 +245,46 @@ impl VirtioBlk {
 
     fn init_virtq(&self) {
         // select the queue 0
-        self.virtio_write(MmioOffset::QueueSel, 0);
+        self.device.virtio_write(MmioOffset::QueueSel, 0);
 
         // give the queue size to the device
-        self.virtio_write(MmioOffset::QueueNum, 16);
+        self.device.virtio_write(MmioOffset::QueueNum, 16);
 
         // give alignment to the device
-        self.virtio_write(MmioOffset::QueueAlign, 0);
+        self.device.virtio_write(MmioOffset::QueueAlign, 0);
 
         // give the address of the queue to the device
-        self.virtio_write(MmioOffset::QueuePfn, &self.virtq as *const Queue as u32);
+        self.device.virtio_write(MmioOffset::QueuePfn, &self.virtq as *const Queue as u32);
     }
 
     fn init_virtblk(&mut self) {
-        if self.virtio_read::<u32>(MmioOffset::Magic) != 0x74726976 || self.virtio_read::<u32>(MmioOffset::Version) != 1 || self.virtio_read::<u32>(MmioOffset::Id) != 2 {
-            panic!("invalid drive: {:#x?}", self.addr);
-        } else {
-            log!("found drive: {:#x?}", self.addr);
+        if self.device.virtio_read::<u32>(MmioOffset::Version) != 1 {
+            panic!("device isnt version 1: {:#x?}", self.device);
         }
 
         // reset the device
-        self.virtio_write(MmioOffset::Status, 0);
+        self.device.virtio_write(MmioOffset::Status, 0);
 
         // acknowlegde the device
-        self.virtio_mask(MmioOffset::Status, VirtioStatus::Ack as u32);
+        self.device.virtio_mask(MmioOffset::Status, VirtioStatus::Ack as u32);
 
         // set driver bit of status
-        self.virtio_mask(MmioOffset::Status, VirtioStatus::Driver as u32);
+        self.device.virtio_mask(MmioOffset::Status, VirtioStatus::Driver as u32);
 
         // set features ok bit of status
-        self.virtio_mask(MmioOffset::Status, VirtioStatus::FeatOk as u32);
+        self.device.virtio_mask(MmioOffset::Status, VirtioStatus::FeatOk as u32);
 
         // initialize the virtqueues
         self.init_virtq();
 
         // set the driver ok bit of status and clear others
-        self.virtio_write(MmioOffset::Status, VirtioStatus::DriverOk as u32);
+        self.device.virtio_write(MmioOffset::Status, VirtioStatus::DriverOk as u32);
 
-        self.capacity = self.virtio_read::<u64>(MmioOffset::Config) * 512;
-
-        log!("virtio-blk capacity: {:#x?}", self.capacity);
+        self.capacity = self.device.virtio_read::<u64>(MmioOffset::Config) * 512;
     }
 }
 
+/*
 pub fn read(sector: u64) -> Result<[u8; 512], Error> {
     let buffer: [u8; 512] = [0; 512];
 
@@ -321,5 +299,6 @@ pub fn write(sector: u64, buffer: [u8; 512]) -> Result<(), Error> {
     VIRTIO_BLK.lock()
         .blk_op(Mode::Write, &buffer as *const [u8; 512] as *mut [u8; 512], sector)
 }
+*/
 
 

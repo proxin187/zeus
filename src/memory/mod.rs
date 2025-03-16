@@ -1,14 +1,16 @@
 use crate::log;
 
-use core::alloc::{GlobalAlloc, Layout};
-use core::ptr::{self, addr_of};
+use core::alloc::{GlobalAlloc, Allocator, Layout, AllocError};
+use core::ptr::{self, NonNull, addr_of};
 use core::mem;
+
+use alloc::alloc;
 
 const CHUNK_LIMIT: usize = 999;
 
 
 #[global_allocator]
-pub static mut ALLOC: Allocator = Allocator::new();
+pub static mut ALLOC: MemoryAllocator = MemoryAllocator::new();
 
 extern "C" {
     static mut __ram: u8;
@@ -34,13 +36,13 @@ impl Chunk {
     }
 }
 
-pub struct Allocator {
+pub struct MemoryAllocator {
     chunks: *mut [Chunk; CHUNK_LIMIT],
 }
 
-impl Allocator {
-    pub const fn new() -> Allocator {
-        Allocator {
+impl MemoryAllocator {
+    pub const fn new() -> MemoryAllocator {
+        MemoryAllocator {
             chunks: ptr::null_mut(),
         }
     }
@@ -85,7 +87,7 @@ impl Allocator {
     }
 }
 
-unsafe impl GlobalAlloc for Allocator {
+unsafe impl GlobalAlloc for MemoryAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         match (*self.chunks).iter_mut().filter(|chunk| chunk.length > layout.size() as u64 + layout.align() as u64).next() {
             Some(chunk) => {
@@ -107,6 +109,18 @@ unsafe impl GlobalAlloc for Allocator {
         self.push(Chunk::new(ptr as u64, layout.size() as u64));
 
         self.defrag();
+    }
+}
+
+pub struct AlignedAlloc<const N: usize>;
+
+unsafe impl<const N: usize> Allocator for AlignedAlloc<N> {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        alloc::Global.allocate(layout.align_to(N).unwrap())
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        alloc::Global.deallocate(ptr, layout.align_to(N).unwrap())
     }
 }
 

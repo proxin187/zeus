@@ -1,5 +1,5 @@
 
 [toolchain]
 channel = "nightly"
-targets = ["riscv64gc-unknown-none-elf"]
+targets = ["riscv64imac-unknown-none-elf"]
 

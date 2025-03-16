@@ -48,6 +48,7 @@ SECTIONS {
     . += 64 * 1024 * 1024; /* 64MB */
     __ram_end = .;
 
+    /* this is used for storing the virtio queue */
     . = ALIGN(4K);
     __virtq = .;
 }
