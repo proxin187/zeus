@@ -2,7 +2,7 @@ mod blk;
 
 use crate::log;
 
-use blk::VirtioBlk;
+use blk::{VirtioBlk, Mode, Error};
 
 use core::ops::RangeInclusive;
 
@@ -26,7 +26,7 @@ pub enum MmioOffset {
 
 #[derive(Debug)]
 pub struct Devices {
-    block: Option<VirtioBlk>,
+    pub block: Option<VirtioBlk>,
 }
 
 impl Devices {
@@ -36,8 +36,36 @@ impl Devices {
         }
     }
 
-    pub fn is_filled(&self) -> bool {
+    fn is_filled(&self) -> bool {
         self.block.is_some()
+    }
+
+    pub fn read_blk(&mut self, sector: u64) -> Result<[u8; 512], Error> {
+        let buffer: [u8; 512] = [0; 512];
+
+        match &mut self.block {
+            Some(block) => {
+                unsafe {
+                    block.blk_op(Mode::Read, &buffer as *const [u8; 512] as *mut [u8; 512], sector).map(|()| buffer)
+                }
+            },
+            None => {
+                panic!("block device unavailable");
+            },
+        }
+    }
+
+    pub fn write_blk(&mut self, sector: u64, buffer: [u8; 512]) -> Result<(), Error> {
+        match &mut self.block {
+            Some(block) => {
+                unsafe {
+                    block.blk_op(Mode::Write, &buffer as *const [u8; 512] as *mut [u8; 512], sector)
+                }
+            },
+            None => {
+                panic!("block device unavailable");
+            },
+        }
     }
 }
 
@@ -114,7 +142,7 @@ pub fn probe() -> Devices {
                 DeviceType::BlockDevice => {
                     log!("{:x?}: virtio-blk device found", device);
 
-                    if devices.block.replace(VirtioBlk::new(device)).is_some() {
+                    if devices.block.replace(unsafe { VirtioBlk::new(device) }).is_some() {
                         panic!("multiple virtio-blk devices not supported");
                     }
                 },

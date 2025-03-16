@@ -66,9 +66,15 @@ pub unsafe fn kmain() -> ! {
 
     memory::init();
 
-    let devices = drivers::virtio::probe();
+    let mut devices = drivers::virtio::probe();
+
+    log!("devices probe done");
 
     log!("devices: {:#x?}", devices);
+
+    // let read = devices.read_blk(0);
+
+    // log!("read: {:?}", read);
 
     loop {}
 

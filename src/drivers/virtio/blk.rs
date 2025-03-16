@@ -1,9 +1,9 @@
 use super::{MmioOffset, Device};
 
-use crate::memory::AlignedAlloc;
-use crate::log;
+use crate::{memory, log};
 
-use alloc::boxed::Box;
+use core::alloc::{GlobalAlloc, Layout};
+use core::mem;
 
 
 #[derive(Debug)]
@@ -133,8 +133,7 @@ pub struct VirtioBlk {
     device: Device,
     capacity: u64,
 
-    // virtq: Box<Queue, AlignedAlloc::<4096>>,
-    virtq: Queue,
+    virtq: *mut Queue,
     req: Request,
 }
 
@@ -155,13 +154,16 @@ impl core::fmt::Debug for VirtioBlk {
 }
 
 impl VirtioBlk {
-    pub fn new(device: Device) -> VirtioBlk {
+    pub unsafe fn new(device: Device) -> VirtioBlk {
+        let virtq = memory::ALLOC.alloc(Layout::from_size_align(mem::size_of::<Queue>(), 4096).expect("invalid layout")) as *mut Queue;
+
+        *virtq = Queue::new();
+
         let mut virtio_blk = VirtioBlk {
             device,
             capacity: 0,
 
-            // virtq: Box::new_in(Queue::new(), AlignedAlloc::<4096>),
-            virtq: Queue::new(),
+            virtq,
             req: Request::new(),
         };
 
@@ -170,17 +172,17 @@ impl VirtioBlk {
         virtio_blk
     }
 
-    fn notify(&mut self) {
-        self.virtq.avail.ring[self.virtq.avail.index as usize % 16] = 0;
+    unsafe fn notify(&mut self) {
+        (*self.virtq).avail.ring[(*self.virtq).avail.index as usize % 16] = 0;
 
-        self.virtq.avail.index = self.virtq.avail.index.wrapping_add(1);
+        (*self.virtq).avail.index = (*self.virtq).avail.index.wrapping_add(1);
 
         self.device.virtio_write(MmioOffset::QueueNotify, 0);
 
-        self.virtq.last_used = self.virtq.last_used.wrapping_add(1);
+        (*self.virtq).last_used = (*self.virtq).last_used.wrapping_add(1);
     }
 
-    fn blk_op(&mut self, mode: Mode, buf: *mut [u8; 512], sector: u64) -> Result<(), Error> {
+    pub unsafe fn blk_op(&mut self, mode: Mode, buf: *mut [u8; 512], sector: u64) -> Result<(), Error> {
         if sector >= self.capacity / 512 {
             Err(Error::OutOfBounds)
         } else {
@@ -193,21 +195,21 @@ impl VirtioBlk {
                 self.req.data = unsafe { *buf };
             }
 
-            self.virtq.descriptors[0] = Descriptor {
+            (*self.virtq).descriptors[0] = Descriptor {
                 addr: &self.req.header as *const Header as u64,
                 len: core::mem::size_of::<Header>() as u32,
                 flags: Flags::Next as u16,
                 next: 1,
             };
 
-            self.virtq.descriptors[1] = Descriptor {
+            (*self.virtq).descriptors[1] = Descriptor {
                 addr: &self.req.data as *const [u8; 512] as u64,
                 len: core::mem::size_of::<[u8; 512]>() as u32,
                 flags: Flags::Next as u16 | Flags::Write as u16,
                 next: 2,
             };
 
-            self.virtq.descriptors[2] = Descriptor {
+            (*self.virtq).descriptors[2] = Descriptor {
                 addr: &self.req.status as *const u8 as u64,
                 len: core::mem::size_of::<u8>() as u32,
                 flags: Flags::Write as u16,
@@ -220,7 +222,7 @@ impl VirtioBlk {
             log!("waiting for read to be done");
 
             unsafe {
-                while self.virtq.last_used != (&self.virtq.used.index as *const u16).read_volatile() {}
+                while (*self.virtq).last_used != (&(*self.virtq).used.index as *const u16).read_volatile() {}
             }
 
             log!("read is done");
@@ -254,7 +256,7 @@ impl VirtioBlk {
         self.device.virtio_write(MmioOffset::QueueAlign, 0);
 
         // give the address of the queue to the device
-        self.device.virtio_write(MmioOffset::QueuePfn, &self.virtq as *const Queue as u32);
+        self.device.virtio_write(MmioOffset::QueuePfn, self.virtq as u32);
     }
 
     fn init_virtblk(&mut self) {
@@ -283,22 +285,5 @@ impl VirtioBlk {
         self.capacity = self.device.virtio_read::<u64>(MmioOffset::Config) * 512;
     }
 }
-
-/*
-pub fn read(sector: u64) -> Result<[u8; 512], Error> {
-    let buffer: [u8; 512] = [0; 512];
-
-    log!("read: {}", sector);
-
-    VIRTIO_BLK.lock()
-        .blk_op(Mode::Read, &buffer as *const [u8; 512] as *mut [u8; 512], sector)
-        .map(|()| buffer)
-}
-
-pub fn write(sector: u64, buffer: [u8; 512]) -> Result<(), Error> {
-    VIRTIO_BLK.lock()
-        .blk_op(Mode::Write, &buffer as *const [u8; 512] as *mut [u8; 512], sector)
-}
-*/
 
 
