@@ -81,8 +81,15 @@ impl MemoryAllocator {
     }
 
     pub unsafe fn align(&self, chunk: &Chunk, align: u64, size: u64) {
-        if chunk.length - (chunk.length & !(align - 1)) > 0 {
-            self.push(Chunk::new(chunk.base as u64 + (chunk.length & !(align - 1)) + size, chunk.length - (chunk.length & !(align - 1))));
+        // TODO: this is currently wrong, the alloc alignment is correct but when pushing a new
+        // block we are doing it wrong
+        if (chunk.base + chunk.length) - ((chunk.base + chunk.length) & !(align - 1)) > 0 {
+            self.push(
+                Chunk::new(
+                    chunk.base as u64 + ((chunk.base + chunk.length) & !(align - 1)) + size,
+                    (chunk.base + chunk.length) - ((chunk.base + chunk.length) & !(align - 1))
+                )
+            );
         }
     }
 }
@@ -95,7 +102,12 @@ unsafe impl GlobalAlloc for MemoryAllocator {
 
                 self.align(&chunk, layout.align() as u64, layout.size() as u64);
 
-                chunk.length &= !(layout.align() as u64 - 1);
+                log!("before: {:#x?}, {:#x?}", chunk.length, (chunk.base + chunk.length));
+
+                // subtract the aligned diff from the length
+                chunk.length -= (chunk.base + chunk.length) - ((chunk.base + chunk.length) & !(layout.align() as u64 - 1));
+
+                log!("after: {:#x?}, {:#x?}", chunk.length, (chunk.base + chunk.length));
 
                 (chunk.base + chunk.length) as *mut u8
             },

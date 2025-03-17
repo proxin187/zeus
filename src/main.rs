@@ -72,9 +72,9 @@ pub unsafe fn kmain() -> ! {
 
     log!("devices: {:#x?}", devices);
 
-    // let read = devices.read_blk(0);
+    let read = devices.read_blk(0);
 
-    // log!("read: {:?}", read);
+    log!("read: {:?}", read);
 
     loop {}
 
