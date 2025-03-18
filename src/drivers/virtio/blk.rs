@@ -155,10 +155,7 @@ impl core::fmt::Debug for VirtioBlk {
 
 impl VirtioBlk {
     pub unsafe fn new(device: Device) -> VirtioBlk {
-        let addr = memory::ALLOC.alloc(Layout::from_size_align(mem::size_of::<Queue>(), 4096).expect("invalid layout")) as *mut Queue;
-        let virtq = addr as *mut Queue;
-
-        log!("virtq: {}, addr: {}", virtq as u64 % 4096, addr as u64 % 4096);
+        let virtq = memory::ALLOC.alloc(Layout::from_size_align(mem::size_of::<Queue>(), 4096).expect("invalid layout")) as *mut Queue;
 
         *virtq = Queue::new();
 
@@ -221,14 +218,9 @@ impl VirtioBlk {
 
             self.notify();
 
-            // TODO: it hangs here, it doesnt seem to recognize when the operation is done
-            log!("waiting virtq: {:#x?}, {}", self.virtq, self.virtq as u64 % 4096);
-
             unsafe {
                 while (*self.virtq).last_used != (&(*self.virtq).used.index as *const u16).read_volatile() {}
             }
-
-            log!("read is done");
 
             match self.req.status {
                 0 => {

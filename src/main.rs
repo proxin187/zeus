@@ -68,13 +68,11 @@ pub unsafe fn kmain() -> ! {
 
     let mut devices = drivers::virtio::probe();
 
-    log!("devices probe done");
-
     log!("devices: {:#x?}", devices);
 
-    let read = devices.read_blk(0);
+    let read = devices.read_blk(0).unwrap();
 
-    log!("read: {:?}", read);
+    log!("read: {:?}", alloc::string::String::from_utf8_lossy(&read));
 
     loop {}
 

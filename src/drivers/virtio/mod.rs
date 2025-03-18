@@ -142,8 +142,15 @@ pub fn probe() -> Devices {
                 DeviceType::BlockDevice => {
                     log!("{:x?}: virtio-blk device found", device);
 
-                    if devices.block.replace(unsafe { VirtioBlk::new(device) }).is_some() {
-                        panic!("multiple virtio-blk devices not supported");
+                    let device = unsafe { VirtioBlk::new(device) };
+
+                    match &devices.block {
+                        Some(device) => {
+                            log!("duplicate block device: {:?}", device);
+                        },
+                        None => {
+                            devices.block = Some(device);
+                        },
                     }
                 },
                 DeviceType::GpuDevice => {
