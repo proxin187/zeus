@@ -74,6 +74,27 @@ pub unsafe fn kmain() -> ! {
 
     log!("read: {:?}", alloc::string::String::from_utf8_lossy(&read));
 
+    let mut data = [0; 512];
+
+    data[0..3].copy_from_slice(&[76, 79, 76]);
+
+    devices.write_blk(0, data).unwrap();
+
+    let read = devices.read_blk(0).unwrap();
+
+    log!("read: {:?}", alloc::string::String::from_utf8_lossy(&read));
+
+    // TODO: we should probably make the devices struct just hold the block device without an
+    // option
+    match devices.block {
+        Some(block) => {
+            fs::init(block);
+        },
+        None => {
+            panic!("no block device found");
+        },
+    }
+
     loop {}
 
     process::spawn("init", init_proc as u64);

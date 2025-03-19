@@ -1,4 +1,4 @@
-mod blk;
+pub mod blk;
 
 use crate::log;
 

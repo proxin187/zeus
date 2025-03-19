@@ -133,7 +133,7 @@ pub struct VirtioBlk {
     device: Device,
     capacity: u64,
 
-    virtq: *mut Queue,
+    virtq: u64,
     req: Request,
 }
 
@@ -163,7 +163,7 @@ impl VirtioBlk {
             device,
             capacity: 0,
 
-            virtq,
+            virtq: virtq as u64,
             req: Request::new(),
         };
 
@@ -173,43 +173,45 @@ impl VirtioBlk {
     }
 
     unsafe fn notify(&mut self) {
-        (*self.virtq).avail.ring[(*self.virtq).avail.index as usize % 16] = 0;
+        let virtq = self.virtq as *const Queue as *mut Queue;
 
-        (*self.virtq).avail.index = (*self.virtq).avail.index.wrapping_add(1);
+        (*virtq).avail.ring[(*virtq).avail.index as usize % 16] = 0;
+
+        (*virtq).avail.index = (*virtq).avail.index.wrapping_add(1);
 
         self.device.virtio_write(MmioOffset::QueueNotify, 0);
 
-        (*self.virtq).last_used = (*self.virtq).last_used.wrapping_add(1);
+        (*virtq).last_used = (*virtq).last_used.wrapping_add(1);
     }
 
     pub unsafe fn blk_op(&mut self, mode: Mode, buf: *mut [u8; 512], sector: u64) -> Result<(), Error> {
         if sector >= self.capacity / 512 {
             Err(Error::OutOfBounds)
         } else {
-            log!("blk_op: mode={:?}, buf={:?}, sector={}", mode, buf, sector);
+            let virtq = self.virtq as *const Queue as *mut Queue;
 
             self.req.header.sector = sector;
             self.req.header._type = mode._type();
 
             if mode == Mode::Write {
-                self.req.data = unsafe { *buf };
+                self.req.data = *buf;
             }
 
-            (*self.virtq).descriptors[0] = Descriptor {
+            (*virtq).descriptors[0] = Descriptor {
                 addr: &self.req.header as *const Header as u64,
                 len: core::mem::size_of::<Header>() as u32,
                 flags: Flags::Next as u16,
                 next: 1,
             };
 
-            (*self.virtq).descriptors[1] = Descriptor {
+            (*virtq).descriptors[1] = Descriptor {
                 addr: &self.req.data as *const [u8; 512] as u64,
                 len: core::mem::size_of::<[u8; 512]>() as u32,
-                flags: Flags::Next as u16 | Flags::Write as u16,
+                flags: Flags::Next as u16 | if mode == Mode::Write { 0 } else { Flags::Write as u16 },
                 next: 2,
             };
 
-            (*self.virtq).descriptors[2] = Descriptor {
+            (*virtq).descriptors[2] = Descriptor {
                 addr: &self.req.status as *const u8 as u64,
                 len: core::mem::size_of::<u8>() as u32,
                 flags: Flags::Write as u16,
@@ -218,16 +220,12 @@ impl VirtioBlk {
 
             self.notify();
 
-            unsafe {
-                while (*self.virtq).last_used != (&(*self.virtq).used.index as *const u16).read_volatile() {}
-            }
+            while (*virtq).last_used != (&(*virtq).used.index as *const u16).read_volatile() {}
 
             match self.req.status {
                 0 => {
                     if mode == Mode::Read {
-                        unsafe {
-                            *buf = self.req.data;
-                        }
+                        *buf = self.req.data;
                     }
 
                     Ok(())
