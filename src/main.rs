@@ -70,6 +70,7 @@ pub unsafe fn kmain() -> ! {
 
     log!("devices: {:#x?}", devices);
 
+    /*
     let read = devices.read_blk(0).unwrap();
 
     log!("read: {:?}", alloc::string::String::from_utf8_lossy(&read));
@@ -83,6 +84,7 @@ pub unsafe fn kmain() -> ! {
     let read = devices.read_blk(0).unwrap();
 
     log!("read: {:?}", alloc::string::String::from_utf8_lossy(&read));
+    */
 
     // TODO: we should probably make the devices struct just hold the block device without an
     // option
