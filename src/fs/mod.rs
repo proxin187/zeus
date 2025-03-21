@@ -3,63 +3,56 @@ mod vfs;
 use crate::drivers::virtio::blk::{VirtioBlk, Mode};
 use crate::log;
 
-use alloc::vec::Vec;
+use alloc::collections::BTreeMap;
+
 use core::cell::OnceCell;
+use core::mem;
+use core::ptr;
 
 use spin::Mutex;
-
-const MAGIC: [u8; 4] = [0x5a, 0x45, 0x55, 0x53];
 
 static FILE_SYSTEM: Mutex<OnceCell<Fs>> = Mutex::new(OnceCell::new());
 
 
 #[repr(C)]
-pub struct Inode {
+pub struct Header {
+    magic: u32,
+    entries: u32,
+}
+
+impl Header {
+    pub fn new(block: [u8; 512]) -> Header {
+        unsafe {
+            ptr::read(block.as_ptr() as *const Header)
+        }
+    }
+}
+
+#[repr(C)]
+pub struct Cluster {
     next: Option<usize>,
-    len: usize,
-}
+    len: u32,
 
-#[repr(C)]
-pub struct Directory {
-    entry: usize,
-}
-
-#[repr(C)]
-pub enum EntryKind {
-    File(Inode),
-    Directory(Directory),
+    data: [u8; 512 - mem::size_of::<Option<usize>>() - mem::size_of::<u32>()],
 }
 
 #[repr(C)]
 pub struct DirEntry {
     name: [u8; 60],
 
-    // addr points to EntryKind, either a file or another directory
-    addr: usize,
-
-    next: Option<usize>,
+    // if there is an address to a cluster then it is a file, otherwise its a directory
+    addr: Option<usize>,
 }
 
-pub struct Fs {
-    block: VirtioBlk,
+pub struct Blocks {
+    driver: VirtioBlk,
 }
 
-impl Fs {
-    pub fn new(block: VirtioBlk) -> Fs {
-        let mut fs = Fs {
-            block,
-        };
-
-        fs.init();
-
-        fs
-    }
-
-    #[inline]
-    fn read_blk(&mut self, sector: u64) -> [u8; 512] {
+impl Blocks {
+    fn read(&mut self, sector: u64) -> [u8; 512] {
         let mut buf = [0; 512];
 
-        let status = unsafe { self.block.blk_op(Mode::Read, &mut buf as *mut [u8; 512], sector) };
+        let status = unsafe { self.driver.blk_op(Mode::Read, &mut buf as *mut [u8; 512], sector) };
 
         match status {
             Ok(()) => buf,
@@ -69,9 +62,8 @@ impl Fs {
         }
     }
 
-    #[inline]
-    fn write_blk(&mut self, sector: u64, mut buf: [u8; 512]) {
-        let data = unsafe { self.block.blk_op(Mode::Write, &mut buf as *mut [u8; 512], sector) };
+    fn write(&mut self, sector: u64, mut buf: [u8; 512]) {
+        let data = unsafe { self.driver.blk_op(Mode::Write, &mut buf as *mut [u8; 512], sector) };
 
         match data {
             Ok(()) => {},
@@ -80,39 +72,55 @@ impl Fs {
             },
         }
     }
+}
 
-    // the first 1024 sectors of the disk represent the zones that say what
-    // sectors are free and what sectors are taken, in the default disk there are 65536 sectors in
-    // total
-    fn init_zones(&mut self) {
-        let mut block = [0; 512];
+pub struct Fs {
+    blocks: Blocks,
+    cache: BTreeMap<[u8; 60], Option<usize>>,
+}
 
-        // this flags the first 1024 + 1 sectors as used
-        block[0..130].copy_from_slice(&[0xff; 130]);
+impl Fs {
+    pub fn new(driver: VirtioBlk) -> Fs {
+        let mut fs = Fs {
+            blocks: Blocks {
+                driver,
+            },
+            cache: BTreeMap::new(),
+        };
 
-        self.write_blk(1, block);
+        fs.init();
 
-        for sector in 2..1025 {
-            let block = [0; 512];
+        fs
+    }
 
-            self.write_blk(0, block);
+    fn load(&mut self, header: Header) {
+        log!("loading entries={}, sectors={}", header.entries, header.entries * mem::size_of::<DirEntry>() as u32 / 512);
+
+        for sector in 0..header.entries * mem::size_of::<DirEntry>() as u32 / 512 {
+            let block = self.blocks.read(sector as u64);
         }
     }
 
-    fn init(&mut self) {
-        if !self.read_blk(0).starts_with(&MAGIC) {
-            log!("init fs at '/'");
+    fn setup(&mut self) {
+        log!("setup started");
 
-            let mut superblock = [0; 512];
+        let mut superblock = [0; 512];
 
-            superblock[0..4].copy_from_slice(&MAGIC);
-
-            self.write_blk(0, superblock);
-
-            self.init_zones();
+        unsafe {
+            (superblock.as_mut_ptr() as *mut Header).write(Header { magic: 0x5a455553, entries: 0 });
         }
 
-        log!("file system setup");
+        self.blocks.write(0, superblock);
+    }
+
+    fn init(&mut self) {
+        let block = self.blocks.read(0);
+        let header = Header::new(block);
+
+        match header.magic {
+            0x5a455553 => self.load(header),
+            _ => self.setup(),
+        }
     }
 
     pub fn touch(&mut self, path: &str) {
