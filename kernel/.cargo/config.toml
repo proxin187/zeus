@@ -9,6 +9,6 @@ build-std = ["core", "compiler_builtins", "alloc"]
 [target.riscv64imac-unknown-none-elf]
 # runner = "qemu-system-riscv64 -machine virt -cpu rv64 -smp 4 -m 128M -drive if=none,format=raw,file=hdd.dsk,id=foo -device virtio-blk-device,drive=foo -nographic -serial mon:stdio -bios default -device virtio-rng-device -device virtio-gpu-device -device virtio-net-device -device virtio-tablet-device -device virtio-keyboard-device -kernel "
 
-runner = "qemu-system-riscv64 -machine virt -bios default -nographic -serial mon:stdio --no-reboot -global virtio-mmio.force-legacy=true -drive if=none,format=raw,file=hdd.dsk,id=drive0 -device virtio-blk-device,drive=drive0 -kernel "
+runner = "qemu-system-riscv64 -machine virt -bios default -nographic -serial mon:stdio --no-reboot -global virtio-mmio.force-legacy=true -drive if=none,format=raw,file=../hdd.dsk,id=drive0 -device virtio-blk-device,drive=drive0 -kernel "
 
 

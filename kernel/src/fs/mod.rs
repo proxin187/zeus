@@ -39,9 +39,7 @@ pub struct Cluster {
 #[repr(C)]
 pub struct DirEntry {
     name: [u8; 60],
-
-    // if there is an address to a cluster then it is a file, otherwise its a directory
-    addr: Option<usize>,
+    addr: Option<u32>,
 }
 
 pub struct Blocks {
