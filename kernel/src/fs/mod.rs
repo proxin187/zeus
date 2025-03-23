@@ -30,15 +30,14 @@ impl Header {
 
 #[repr(C)]
 pub struct Cluster {
-    next: Option<usize>,
+    next: Option<u32>,
     len: u32,
-
-    data: [u8; 512 - mem::size_of::<Option<usize>>() - mem::size_of::<u32>()],
+    data: [u8; 492],
 }
 
 #[repr(C)]
 pub struct DirEntry {
-    name: [u8; 60],
+    name: [u8; 56],
     addr: Option<u32>,
 }
 
