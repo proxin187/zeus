@@ -1,7 +1,16 @@
 use std::os::unix::fs::FileExt;
 use std::fs::{self, File, Metadata};
+use std::slice;
 use std::mem;
 
+
+macro_rules! encode {
+    ($value:expr) => {
+        unsafe {
+            slice::from_raw_parts($value as *const _ as *const u8, mem::size_of_val($value))
+        }
+    };
+}
 
 #[repr(C)]
 pub struct Header {
@@ -10,67 +19,76 @@ pub struct Header {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct Cluster {
-    next: Option<usize>,
+    next: Option<u32>,
     len: u32,
-
-    data: [u8; 512 - mem::size_of::<Option<usize>>() - mem::size_of::<u32>()],
+    data: [u8; 492],
 }
 
-// TODO: it would be nice if we could make sure that the size of this is a multiple of a 8 so that
-// it doesnt cut across sectors
 #[repr(C)]
+#[derive(Debug)]
 pub struct DirEntry {
     name: [u8; 56],
     addr: Option<u32>,
 }
 
-pub struct Block {
+pub struct Mkfs<'a> {
     file: File,
+    entries: Vec<DirEntry>,
+    cluster: u32,
+    dir: &'a str,
 }
 
-impl Block {
-    pub fn new(path: &str) -> Result<Block, Box<dyn std::error::Error>> {
+impl<'a> Mkfs<'a> {
+    pub fn new(path: &str, dir: &'a str) -> Result<Mkfs<'a>, Box<dyn std::error::Error>> {
         let file = File::create(path)?;
 
-        file.set_len(65536)?;
+        // this is 1 gigabyte
+        file.set_len(1074000000)?;
 
-        Ok(Block {
-            file,
-        })
-    }
-
-    pub fn write(&mut self, sector: u64, buf: &[u8]) -> Result<usize, Box<dyn std::error::Error>> {
-        self.file.write_at(buf, sector * 512)
-            .map_err(|err| err.into())
-    }
-
-    pub fn read(&mut self, sector: u64) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let mut buf: [u8; 512] = [0; 512];
-
-        self.file.read_at(&mut buf, sector * 512)
-            .map_err(|err| err.into())
-            .map(|read| buf[..read].to_vec())
-    }
-}
-
-pub struct Mkfs {
-    block: Block,
-    entries: Vec<DirEntry>,
-}
-
-impl Mkfs {
-    pub fn new(path: &str) -> Result<Mkfs, Box<dyn std::error::Error>> {
         Ok(Mkfs {
-            block: Block::new(path)?,
+            file,
             entries: Vec::new(),
+            cluster: 256,
+            dir,
         })
     }
 
-    fn handle_entry(&mut self, path: &str, metadata: Metadata) -> Result<(), Box<dyn std::error::Error>> {
-        println!("append_entry: path={:?}, metadata: {:?}", path, metadata);
+    fn cluster(&mut self, absolute: &str) -> Result<u32, Box<dyn std::error::Error>> {
+        let bytes = fs::read(absolute)?;
+        let chunks = bytes.chunks(492);
+        let total = chunks.len();
 
-        let mut name = path.as_bytes().to_vec();
+        let cluster = self.cluster;
+
+        for (index, mut chunk) in chunks.map(|chunk| chunk.to_vec()).enumerate() {
+            let len = chunk.len() as u32;
+
+            chunk.resize(492, 0);
+
+            let cluster = Cluster {
+                next: (index + 1 < total).then(|| self.cluster + 1),
+                len,
+                data: chunk.try_into().map_err(|_| Into::<Box<dyn std::error::Error>>::into("failed to convert"))?,
+            };
+
+            println!("cluster: cluster={:?}, addr={:?}", cluster, self.cluster as u64 * 512);
+
+            self.file.write_at(encode!(&cluster), self.cluster as u64 * 512)?;
+
+            self.cluster += 1;
+        }
+
+        Ok(cluster)
+    }
+
+    fn handle_entry(&mut self, absolute: &str, metadata: Metadata) -> Result<(), Box<dyn std::error::Error>> {
+        let (_, relative) = absolute.split_at(self.dir.len());
+
+        println!("append_entry: absolute={:?}, relative={:?}, metadata: {:?}", absolute, relative, metadata);
+
+        let mut name = relative.as_bytes().to_vec();
 
         name.resize(56, 0);
 
@@ -80,13 +98,13 @@ impl Mkfs {
                 addr: None,
             });
 
-            self.make(path)
+            self.make(absolute)
         } else {
-            // TODO: here we will have to allocate clusters for the file
+            let cluster = self.cluster(absolute)?;
 
             self.entries.push(DirEntry {
                 name: name.try_into().map_err(|_| Into::<Box<dyn std::error::Error>>::into("failed to convert"))?,
-                addr: None,
+                addr: Some(cluster),
             });
 
             Ok(())
@@ -110,15 +128,30 @@ impl Mkfs {
         Ok(())
     }
 
-    fn flush(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    fn header(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let header = Header {
+            magic: 0x5a455553,
+            entries: self.entries.len() as u32,
+        };
+
+        self.file.write_at(encode!(&header), 0)?;
+
         Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        for (index, entry) in self.entries.iter().enumerate() {
+            println!("flush: entry={:?}", entry);
+
+            self.file.write_at(encode!(entry), 512 + (index as u64 * mem::size_of::<DirEntry>() as u64))?;
+        }
+
+        self.header()
     }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("{}", mem::size_of::<DirEntry>());
-
-    let mut mkfs = Mkfs::new("hdd.dsk")?;
+    let mut mkfs = Mkfs::new("../hdd.dsk", "../user")?;
 
     mkfs.make("../user")?;
 
