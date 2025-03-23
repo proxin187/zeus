@@ -1,4 +1,7 @@
+mod error;
 mod vfs;
+
+use error::Error;
 
 use crate::drivers::virtio::blk::{VirtioBlk, Mode};
 use crate::log;
@@ -6,6 +9,7 @@ use crate::log;
 use alloc::collections::BTreeMap;
 
 use core::cell::OnceCell;
+use core::ops::Range;
 use core::mem;
 use core::ptr;
 
@@ -13,6 +17,13 @@ use spin::Mutex;
 
 static FILE_SYSTEM: Mutex<OnceCell<Fs>> = Mutex::new(OnceCell::new());
 
+macro_rules! decode {
+    ($value:expr) => {
+        unsafe {
+            ptr::read($value as *const [u8] as *const _)
+        }
+    };
+}
 
 #[repr(C)]
 pub struct Header {
@@ -29,6 +40,7 @@ impl Header {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct Cluster {
     next: Option<u32>,
     len: u32,
@@ -36,6 +48,7 @@ pub struct Cluster {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct DirEntry {
     name: [u8; 56],
     addr: Option<u32>,
@@ -73,7 +86,7 @@ impl Blocks {
 
 pub struct Fs {
     blocks: Blocks,
-    cache: BTreeMap<[u8; 60], Option<usize>>,
+    cache: BTreeMap<[u8; 56], Option<u32>>,
 }
 
 impl Fs {
@@ -90,24 +103,28 @@ impl Fs {
         fs
     }
 
-    fn load(&mut self, header: Header) {
-        log!("loading entries={}, sectors={}", header.entries, header.entries * mem::size_of::<DirEntry>() as u32 / 512);
+    fn cache(&mut self, block: &[u8]) {
+        for chunk in block.chunks(mem::size_of::<DirEntry>()) {
+            if chunk.iter().all(|byte| *byte == 0) {
+                break;
+            } else {
+                let entry: DirEntry = decode!(chunk);
 
-        for sector in 0..header.entries * mem::size_of::<DirEntry>() as u32 / 512 {
-            let block = self.blocks.read(sector as u64);
+                log!("entry: {:?}", entry);
+
+                self.cache.insert(entry.name, entry.addr);
+            }
         }
     }
 
-    fn setup(&mut self) {
-        log!("setup started");
+    fn load(&mut self, header: Header) {
+        log!("loading entries={}, sectors={}", header.entries, 1 + header.entries * mem::size_of::<DirEntry>() as u32 / 512);
 
-        let mut superblock = [0; 512];
+        for sector in 0..1 + header.entries * mem::size_of::<DirEntry>() as u32 / 512 {
+            let block = self.blocks.read(1 + sector as u64);
 
-        unsafe {
-            (superblock.as_mut_ptr() as *mut Header).write(Header { magic: 0x5a455553, entries: 0 });
+            self.cache(&block);
         }
-
-        self.blocks.write(0, superblock);
     }
 
     fn init(&mut self) {
@@ -116,7 +133,36 @@ impl Fs {
 
         match header.magic {
             0x5a455553 => self.load(header),
-            _ => self.setup(),
+            _ => {
+                panic!("invalid tndfs partition");
+            },
+        }
+    }
+
+    // TODO: finish this
+    fn read_cluster(&mut self, mut addr: u32, range: Range<usize>, buf: &mut [u8]) {
+        let block = self.blocks.read(addr as u64);
+        let cluster: Cluster = decode!(&block);
+
+        log!("cluster: {:?}", cluster);
+    }
+
+    // the simplest way to do this would be to simply iterate over the file and keep a count of the
+    // index and iterate until we hit the start
+    //
+    // another way to do this would be to iterate over just the clusters and check if the count is
+    // inside else advance onto the next cluster and so on.
+    pub fn read(&mut self, range: Range<usize>, path: [u8; 56], buf: &mut [u8]) -> Result<(), Error> {
+        match self.cache.get(&path) {
+            Some(addr) => match addr {
+                Some(addr) => {
+                    self.read_cluster(*addr, range, buf);
+
+                    Ok(())
+                },
+                None => Err(Error::ExpectedFile),
+            },
+            None => Err(Error::InvalidPath),
         }
     }
 
@@ -132,6 +178,15 @@ impl Fs {
 
 pub fn init(block: VirtioBlk) {
     FILE_SYSTEM.lock().get_or_init(|| Fs::new(block));
+
+    let mut path: [u8; 56] = [0; 56];
+
+    // /home/proxin/test.txt
+    path[0..21].copy_from_slice(&[47, 104, 111, 109, 101, 47, 112, 114, 111, 120, 105, 110, 47, 116, 101, 115, 116, 46, 116, 120, 116]);
+
+    let result = FILE_SYSTEM.lock().get_mut().unwrap().read(0..15, path, &mut [0]);
+
+    log!("result: {:?}", result);
 }
 
 
