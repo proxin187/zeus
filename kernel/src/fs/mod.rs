@@ -140,11 +140,33 @@ impl Fs {
     }
 
     // TODO: finish this
-    fn read_cluster(&mut self, mut addr: u32, range: Range<usize>, buf: &mut [u8]) {
-        let block = self.blocks.read(addr as u64);
-        let cluster: Cluster = decode!(&block);
+    fn read_cluster(&mut self, mut cluster: Cluster, range: Range<u32>, buf: &mut [u8]) -> Result<(), Error> {
+        let mut count: u32 = 0;
 
-        log!("cluster: {:?}", cluster);
+        while let Some(next) = cluster.next {
+            log!("cluster: {:?}", cluster);
+
+            // this checks if the start is inside the current cluster, eg. bigger than the start
+            // offset and smaller than the end offset
+            if range.start >= count && range.start < count + cluster.len {
+                // TODO: finish this
+                buf[count as usize..count as usize + cluster.len as usize].copy_from_slice(&cluster.data[range.start as usize - count as usize..cluster.len as usize]);
+                // we are in the first cluster
+            } else if range.end >= count && range.end < count + cluster.len {
+                buf[count as usize..count as usize + cluster.len as usize].copy_from_slice(&cluster.data[..cluster.len as usize]);
+                // we are in the last cluster
+            } else if range.start < count && range.end >= count {
+                // we are in a middle cluster
+            } else {
+                return Ok(());
+            }
+
+            count += cluster.len;
+
+            cluster = decode!(&self.blocks.read(next as u64));
+        }
+
+        Err(Error::OutOfBounds)
     }
 
     // the simplest way to do this would be to simply iterate over the file and keep a count of the
@@ -152,13 +174,13 @@ impl Fs {
     //
     // another way to do this would be to iterate over just the clusters and check if the count is
     // inside else advance onto the next cluster and so on.
-    pub fn read(&mut self, range: Range<usize>, path: [u8; 56], buf: &mut [u8]) -> Result<(), Error> {
+    pub fn read(&mut self, range: Range<u32>, path: [u8; 56], buf: &mut [u8]) -> Result<(), Error> {
         match self.cache.get(&path) {
             Some(addr) => match addr {
                 Some(addr) => {
-                    self.read_cluster(*addr, range, buf);
+                    let block = self.blocks.read(*addr as u64);
 
-                    Ok(())
+                    self.read_cluster(decode!(&block), range, buf)
                 },
                 None => Err(Error::ExpectedFile),
             },
