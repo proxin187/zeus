@@ -131,7 +131,7 @@ impl Mode {
 
 pub struct VirtioBlk {
     device: Device,
-    capacity: u64,
+    pub capacity: u64,
 
     virtq: u64,
     req: Request,

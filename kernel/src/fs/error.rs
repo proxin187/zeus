@@ -6,6 +6,7 @@ pub enum Error {
     InvalidPath,
     ExpectedFile,
     OutOfBounds,
+    LimitedSpace,
 }
 
 

@@ -7,12 +7,14 @@ use crate::drivers::virtio::blk::{VirtioBlk, Mode};
 use crate::log;
 
 use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 
 use core::cell::OnceCell;
 use core::ops::Range;
 use core::mem;
 use core::ptr;
 
+use bitvec::vec::BitVec;
 use spin::Mutex;
 
 static FILE_SYSTEM: Mutex<OnceCell<Fs>> = Mutex::new(OnceCell::new());
@@ -84,17 +86,48 @@ impl Blocks {
     }
 }
 
+pub struct ZMap {
+    zones: BitVec,
+}
+
+impl ZMap {
+    pub fn new(len: usize) -> ZMap {
+        ZMap {
+            zones: BitVec::repeat(false, len),
+        }
+    }
+
+    pub fn set(&mut self, zone: usize, status: bool) {
+        self.zones.set(zone, status);
+    }
+
+    pub fn alloc(&mut self) -> Result<usize, Error> {
+        match self.zones.first_zero() {
+            Some(zone) => {
+                self.zones.set(zone, true);
+
+                Ok(zone)
+            },
+            None => Err(Error::LimitedSpace),
+        }
+    }
+}
+
 pub struct Fs {
     blocks: Blocks,
+    zmap: ZMap,
     cache: BTreeMap<[u8; 56], Option<u32>>,
 }
 
 impl Fs {
     pub fn new(driver: VirtioBlk) -> Fs {
+        let zmap = ZMap::new(driver.capacity as usize / 512);
+
         let mut fs = Fs {
             blocks: Blocks {
                 driver,
             },
+            zmap,
             cache: BTreeMap::new(),
         };
 
@@ -139,49 +172,66 @@ impl Fs {
         }
     }
 
-    // TODO: finish this
-    fn read_cluster(&mut self, mut cluster: Cluster, range: Range<u32>, buf: &mut [u8]) -> Result<(), Error> {
+    fn read_cluster(&mut self, mut cluster: Cluster, range: Range<u32>) -> Result<Vec<u8>, Error> {
         let mut count: u32 = 0;
+        let mut buf: Vec<u8> = Vec::new();
 
-        while let Some(next) = cluster.next {
-            log!("cluster: {:?}", cluster);
-
-            // this checks if the start is inside the current cluster, eg. bigger than the start
-            // offset and smaller than the end offset
+        loop {
+            // TODO: this is a quick and easy solution, but im sure that you can find a generic function
+            // that applies to all cases
             if range.start >= count && range.start < count + cluster.len {
-                // TODO: finish this
-                buf[count as usize..count as usize + cluster.len as usize].copy_from_slice(&cluster.data[range.start as usize - count as usize..cluster.len as usize]);
-                // we are in the first cluster
+                if range.end >= count && range.end < count + cluster.len {
+                    buf.extend(&cluster.data[range.start as usize..range.end as usize]);
+
+                    return Ok(buf);
+                } else {
+                    buf.extend(&cluster.data[range.start as usize - count as usize..cluster.len as usize]);
+                }
             } else if range.end >= count && range.end < count + cluster.len {
-                buf[count as usize..count as usize + cluster.len as usize].copy_from_slice(&cluster.data[..cluster.len as usize]);
-                // we are in the last cluster
+                buf.extend(&cluster.data[..range.end as usize - count as usize]);
+
+                return Ok(buf);
             } else if range.start < count && range.end >= count {
-                // we are in a middle cluster
-            } else {
-                return Ok(());
+                buf.extend(&cluster.data);
             }
 
-            count += cluster.len;
+            match cluster.next {
+                Some(next) => {
+                    count += cluster.len;
 
-            cluster = decode!(&self.blocks.read(next as u64));
+                    cluster = decode!(&self.blocks.read(next as u64));
+                },
+                None => {
+                    return Err(Error::OutOfBounds);
+                },
+            }
         }
-
-        Err(Error::OutOfBounds)
     }
 
-    // the simplest way to do this would be to simply iterate over the file and keep a count of the
-    // index and iterate until we hit the start
-    //
-    // another way to do this would be to iterate over just the clusters and check if the count is
-    // inside else advance onto the next cluster and so on.
-    pub fn read(&mut self, range: Range<u32>, path: [u8; 56], buf: &mut [u8]) -> Result<(), Error> {
+    fn write_cluster(&mut self, mut cluster: Cluster, offset: u32, data: &[u8]) -> Result<(), Error> {
+        let mut count: u32 = 0;
+
+        loop {
+            // TODO: here we will have to implement allocation of disk space so that we can append
+            // a new cluster for the new data
+
+            match cluster.next {
+                Some(next) => {
+                    count += cluster.len;
+
+                    cluster = decode!(&self.blocks.read(next as u64));
+                },
+                None => {
+                    return Err(Error::OutOfBounds);
+                },
+            }
+        }
+    }
+
+    pub fn query(&self, path: [u8; 56]) -> Result<u32, Error> {
         match self.cache.get(&path) {
             Some(addr) => match addr {
-                Some(addr) => {
-                    let block = self.blocks.read(*addr as u64);
-
-                    self.read_cluster(decode!(&block), range, buf)
-                },
+                Some(addr) => Ok(*addr),
                 None => Err(Error::ExpectedFile),
             },
             None => Err(Error::InvalidPath),
@@ -206,9 +256,28 @@ pub fn init(block: VirtioBlk) {
     // /home/proxin/test.txt
     path[0..21].copy_from_slice(&[47, 104, 111, 109, 101, 47, 112, 114, 111, 120, 105, 110, 47, 116, 101, 115, 116, 46, 116, 120, 116]);
 
-    let result = FILE_SYSTEM.lock().get_mut().unwrap().read(0..15, path, &mut [0]);
+    let mut lock = FILE_SYSTEM.lock();
 
-    log!("result: {:?}", result);
+    let fs = lock.get_mut().unwrap();
+
+    match fs.query(path) {
+        Ok(addr) => {
+            let block = fs.blocks.read(addr as u64);
+
+            let bytes = fs.read_cluster(decode!(&block), 38..100).unwrap();
+
+            log!("bytes: {:?}", alloc::string::String::from_utf8_lossy(&bytes));
+
+            fs.write_cluster(decode!(&block), 40, &[104, 111, 109, 101]).unwrap();
+
+            let bytes = fs.read_cluster(decode!(&block), 38..100).unwrap();
+
+            log!("bytes: {:?}", alloc::string::String::from_utf8_lossy(&bytes));
+        },
+        Err(err) => {
+            log!("failed to query: {:?}", err);
+        },
+    }
 }
 
 
