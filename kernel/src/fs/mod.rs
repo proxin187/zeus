@@ -11,6 +11,7 @@ use alloc::vec::Vec;
 
 use core::cell::OnceCell;
 use core::ops::Range;
+use core::iter;
 use core::mem;
 use core::ptr;
 
@@ -49,6 +50,20 @@ pub struct Cluster {
     data: [u8; 492],
 }
 
+impl Cluster {
+    pub fn new(next: Option<u32>, bytes: &[u8]) -> Cluster {
+        let mut data: [u8; 492] = [0; 492];
+
+        data[0..bytes.len()].copy_from_slice(&bytes);
+
+        Cluster {
+            next,
+            len: bytes.len() as u32,
+            data,
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct DirEntry {
@@ -61,6 +76,12 @@ pub struct Blocks {
 }
 
 impl Blocks {
+    pub fn new(driver: VirtioBlk) -> Blocks {
+        Blocks {
+            driver,
+        }
+    }
+
     fn read(&mut self, sector: u64) -> [u8; 512] {
         let mut buf = [0; 512];
 
@@ -92,8 +113,15 @@ pub struct ZMap {
 
 impl ZMap {
     pub fn new(len: usize) -> ZMap {
+        // | header (1 sector) | directory table (256 sectors) | clusters |
+        let mut zones = BitVec::repeat(true, 257);
+
+        let clusters: BitVec = BitVec::repeat(false, len - 257);
+
+        zones.extend(clusters);
+
         ZMap {
-            zones: BitVec::repeat(false, len),
+            zones,
         }
     }
 
@@ -101,12 +129,12 @@ impl ZMap {
         self.zones.set(zone, status);
     }
 
-    pub fn alloc(&mut self) -> Result<usize, Error> {
+    pub fn alloc(&mut self) -> Result<u32, Error> {
         match self.zones.first_zero() {
             Some(zone) => {
                 self.zones.set(zone, true);
 
-                Ok(zone)
+                Ok(zone as u32)
             },
             None => Err(Error::LimitedSpace),
         }
@@ -114,20 +142,16 @@ impl ZMap {
 }
 
 pub struct Fs {
-    blocks: Blocks,
     zmap: ZMap,
+    blocks: Blocks,
     cache: BTreeMap<[u8; 56], Option<u32>>,
 }
 
 impl Fs {
     pub fn new(driver: VirtioBlk) -> Fs {
-        let zmap = ZMap::new(driver.capacity as usize / 512);
-
         let mut fs = Fs {
-            blocks: Blocks {
-                driver,
-            },
-            zmap,
+            zmap: ZMap::new(driver.capacity as usize / 512),
+            blocks: Blocks::new(driver),
             cache: BTreeMap::new(),
         };
 
@@ -146,6 +170,10 @@ impl Fs {
                 log!("entry: {:?}", entry);
 
                 self.cache.insert(entry.name, entry.addr);
+
+                if let Some(zone) = entry.addr {
+                    self.zmap.set(zone as usize, true);
+                }
             }
         }
     }
@@ -195,16 +223,9 @@ impl Fs {
                 buf.extend(&cluster.data);
             }
 
-            match cluster.next {
-                Some(next) => {
-                    count += cluster.len;
+            count += cluster.len;
 
-                    cluster = decode!(&self.blocks.read(next as u64));
-                },
-                None => {
-                    return Err(Error::OutOfBounds);
-                },
-            }
+            cluster = decode!(&self.blocks.read(cluster.next.ok_or(Error::OutOfBounds)? as u64));
         }
     }
 
@@ -212,23 +233,35 @@ impl Fs {
         let mut count: u32 = 0;
 
         loop {
-            // TODO: here we will have to implement allocation of disk space so that we can append
-            // a new cluster for the new data
+            if offset >= count && offset < count + cluster.len {
+                // TODO: here we will have to split the cluster to insert the new cluster chain in
+                // between
 
-            match cluster.next {
-                Some(next) => {
-                    count += cluster.len;
-
-                    cluster = decode!(&self.blocks.read(next as u64));
-                },
-                None => {
-                    return Err(Error::OutOfBounds);
-                },
+                // let addr = self.chain_cluster(data, hook)?;
             }
+
+            count += cluster.len;
+
+            cluster = decode!(&self.blocks.read(cluster.next.ok_or(Error::OutOfBounds)? as u64));
         }
     }
 
-    pub fn query(&self, path: [u8; 56]) -> Result<u32, Error> {
+    fn chain_cluster(&mut self, data: &[u8], hook: u32) -> Result<u32, Error> {
+        let zones = iter::repeat_with(|| self.zmap.alloc()).take(data.len() / 492).collect::<Vec<Result<u32, Error>>>();
+
+        for (index, bytes) in data.chunks(492).enumerate() {
+            let next = (index < zones.len() - 1).then_some(zones[index + 1]?).or_else(|| Some(hook));
+            let cluster = Cluster::new(next, data);
+
+            unsafe {
+                self.blocks.write(zones[index]? as u64, mem::transmute_copy(&cluster));
+            }
+        }
+
+        Ok(zones[0]?)
+    }
+
+    fn query(&self, path: [u8; 56]) -> Result<u32, Error> {
         match self.cache.get(&path) {
             Some(addr) => match addr {
                 Some(addr) => Ok(*addr),

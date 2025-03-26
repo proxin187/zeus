@@ -1,7 +1,7 @@
 
 
 #[repr(u8)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Error {
     InvalidPath,
     ExpectedFile,
