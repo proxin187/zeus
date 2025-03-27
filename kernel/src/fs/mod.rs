@@ -8,6 +8,7 @@ use crate::log;
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
+use alloc::vec;
 
 use core::cell::OnceCell;
 use core::ops::Range;
@@ -15,7 +16,6 @@ use core::iter;
 use core::mem;
 use core::ptr;
 
-use bitvec::vec::BitVec;
 use spin::Mutex;
 
 static FILE_SYSTEM: Mutex<OnceCell<Fs>> = Mutex::new(OnceCell::new());
@@ -47,12 +47,12 @@ impl Header {
 pub struct Cluster {
     next: Option<u32>,
     len: u32,
-    data: [u8; 492],
+    data: [u8; 500],
 }
 
 impl Cluster {
     pub fn new(next: Option<u32>, bytes: &[u8]) -> Cluster {
-        let mut data: [u8; 492] = [0; 492];
+        let mut data: [u8; 500] = [0; 500];
 
         data[0..bytes.len()].copy_from_slice(&bytes);
 
@@ -108,36 +108,47 @@ impl Blocks {
 }
 
 pub struct ZMap {
-    zones: BitVec,
+    bitmap: Vec<u32>,
 }
 
 impl ZMap {
     pub fn new(len: usize) -> ZMap {
         // | header (1 sector) | directory table (256 sectors) | clusters |
-        let mut zones = BitVec::repeat(true, 257);
+        let mut bitmap = vec![0xffffffff; 11];
 
-        let clusters: BitVec = BitVec::repeat(false, len - 257);
+        let clusters = vec![0; len - 5];
 
-        zones.extend(clusters);
+        bitmap.extend(clusters);
 
         ZMap {
-            zones,
+            bitmap,
         }
     }
 
-    pub fn set(&mut self, zone: usize, status: bool) {
-        self.zones.set(zone, status);
+    pub fn set(&mut self, zone: u32, status: bool) {
+        if status {
+            self.bitmap[zone as usize / 32] |= 0b1 << (zone & 0b11111);
+        } else {
+            self.bitmap[zone as usize / 32] &= !(0b1 << (zone & 0b11111));
+        }
     }
 
     pub fn alloc(&mut self) -> Result<u32, Error> {
-        match self.zones.first_zero() {
-            Some(zone) => {
-                self.zones.set(zone, true);
+        for (index, bit) in self.bitmap.iter().enumerate() {
+            if *bit != u32::MAX {
+                let zone = index as u32 * 32 + (0b1 << bit.leading_ones());
 
-                Ok(zone as u32)
-            },
-            None => Err(Error::LimitedSpace),
+                // TODO: we allocate the same zone twice this is obviously wrong and will need to
+                // be fixed
+                log!("alloc: {}", zone);
+
+                self.set(zone, true);
+
+                return Ok(zone);
+            }
         }
+
+        Err(Error::LimitedSpace)
     }
 }
 
@@ -149,8 +160,10 @@ pub struct Fs {
 
 impl Fs {
     pub fn new(driver: VirtioBlk) -> Fs {
+        let zmap = ZMap::new(driver.capacity as usize / 512);
+
         let mut fs = Fs {
-            zmap: ZMap::new(driver.capacity as usize / 512),
+            zmap,
             blocks: Blocks::new(driver),
             cache: BTreeMap::new(),
         };
@@ -172,7 +185,7 @@ impl Fs {
                 self.cache.insert(entry.name, entry.addr);
 
                 if let Some(zone) = entry.addr {
-                    self.zmap.set(zone as usize, true);
+                    self.zmap.set(zone, true);
                 }
             }
         }
@@ -229,29 +242,64 @@ impl Fs {
         }
     }
 
-    fn write_cluster(&mut self, mut cluster: Cluster, offset: u32, data: &[u8]) -> Result<(), Error> {
+    fn write_cluster(&mut self, mut cluster: Cluster, mut cluster_addr: u32, offset: u32, data: &[u8]) -> Result<(), Error> {
         let mut count: u32 = 0;
 
         loop {
             if offset >= count && offset < count + cluster.len {
-                // TODO: here we will have to split the cluster to insert the new cluster chain in
-                // between
+                let hook = self.zmap.alloc()?;
+                let split = Cluster::new(cluster.next, &cluster.data[offset as usize - count as usize..]);
 
-                // let addr = self.chain_cluster(data, hook)?;
+                log!("size: {}", mem::size_of::<Cluster>());
+
+                unsafe {
+                    self.blocks.write(hook as u64, mem::transmute_copy(&split));
+                }
+
+                // TODO: the problem is that the hook is 353 but the first in the clusterchain is
+                // also this, it looks like it has a problem allocating new addresses
+                log!("chaining the clusters: {}", hook);
+
+                let addr = self.chain_cluster(data, hook)?;
+
+                log!("cluster chain: {}", addr);
+
+                cluster.next = Some(addr);
+
+                unsafe {
+                    self.blocks.write(cluster_addr as u64, mem::transmute_copy(&cluster));
+                }
+
+                log!("done with writing new cluster");
             }
 
             count += cluster.len;
 
-            cluster = decode!(&self.blocks.read(cluster.next.ok_or(Error::OutOfBounds)? as u64));
+            match cluster.next {
+                Some(next) => {
+                    cluster_addr = next;
+
+                    log!("reading now: {}", cluster_addr);
+
+                    cluster = decode!(&self.blocks.read(cluster_addr as u64));
+
+                    log!("done reading");
+
+                    loop {}
+                },
+                None => {
+                    return Ok(());
+                },
+            }
         }
     }
 
     fn chain_cluster(&mut self, data: &[u8], hook: u32) -> Result<u32, Error> {
-        let zones = iter::repeat_with(|| self.zmap.alloc()).take(data.len() / 492).collect::<Vec<Result<u32, Error>>>();
+        let zones = iter::repeat_with(|| self.zmap.alloc()).take((data.len() / 500) + 1).collect::<Vec<Result<u32, Error>>>();
 
-        for (index, bytes) in data.chunks(492).enumerate() {
-            let next = (index < zones.len() - 1).then_some(zones[index + 1]?).or_else(|| Some(hook));
-            let cluster = Cluster::new(next, data);
+        for (index, bytes) in data.chunks(500).enumerate() {
+            let next = (index < zones.len() - 1).then(|| zones[index + 1].expect("internal error")).or_else(|| Some(hook));
+            let cluster = Cluster::new(next, bytes);
 
             unsafe {
                 self.blocks.write(zones[index]? as u64, mem::transmute_copy(&cluster));
@@ -301,7 +349,9 @@ pub fn init(block: VirtioBlk) {
 
             log!("bytes: {:?}", alloc::string::String::from_utf8_lossy(&bytes));
 
-            fs.write_cluster(decode!(&block), 40, &[104, 111, 109, 101]).unwrap();
+            fs.write_cluster(decode!(&block), addr, 40, &[104, 111, 109, 101]).unwrap();
+
+            log!("done writing cluster");
 
             let bytes = fs.read_cluster(decode!(&block), 38..100).unwrap();
 

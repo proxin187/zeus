@@ -11,6 +11,5 @@ panic ="abort"
 
 [dependencies]
 spin = "0.9.8"
-bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
 
 
