@@ -136,18 +136,9 @@ impl ZMap {
     pub fn alloc(&mut self) -> Result<u32, Error> {
         for index in 0..self.bitmap.len() {
             if self.bitmap[index] != u32::MAX {
-                let zone = index as u32 * 32 + (0b1 << self.bitmap[index].leading_ones()) - 1;
+                let zone = index as u32 * 32 + self.bitmap[index].leading_ones() + 31;
 
-                // TODO: i think we are mixing up indexes that start on 0 and indexes that start on
-                // 1 lol
-
-                log!("bit: {}, zone: {}, before: {:#032b}", (0b1 << self.bitmap[index].leading_ones()) - 1, zone, self.bitmap[index]);
-
-                // TODO: we allocate the same zone twice this is obviously wrong and will need to
-                // be fixed
                 self.set(zone, true);
-
-                log!("zone: {}, after: {:#032b}", zone, self.bitmap[index]);
 
                 return Ok(zone);
             }
