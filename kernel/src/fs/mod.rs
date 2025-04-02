@@ -169,6 +169,19 @@ impl Fs {
         fs
     }
 
+    #[inline]
+    fn cache_cluster(&mut self, mut cluster: Cluster) {
+        while let Some(addr) = cluster.next {
+            self.zmap.set(addr, true);
+
+            cluster = decode!(&self.blocks.read(addr as u64));
+
+            // TODO: the cluster seems to be corrupted, it points in circles, this must be a
+            // problem within the mkfs implementation
+            log!("cluster: {:?}, addr: {}", cluster, addr);
+        }
+    }
+
     fn cache(&mut self, block: &[u8]) {
         for chunk in block.chunks(mem::size_of::<DirEntry>()) {
             if chunk.iter().all(|byte| *byte == 0) {
@@ -182,6 +195,10 @@ impl Fs {
 
                 if let Some(zone) = entry.addr {
                     self.zmap.set(zone, true);
+
+                    let cluster = decode!(&self.blocks.read(zone as u64));
+
+                    self.cache_cluster(cluster);
                 }
             }
         }
@@ -244,18 +261,20 @@ impl Fs {
         loop {
             if offset >= count && offset < count + cluster.len {
                 let hook = self.zmap.alloc()?;
+
                 let split = Cluster::new(cluster.next, &cluster.data[offset as usize - count as usize..]);
 
-                log!("size: {}", mem::size_of::<Cluster>());
+                log!("split: {:?}", split);
+
+                // TODO: the problem now is that the clusters hook to eachother, creating an
+                // infinite loop
 
                 unsafe {
                     self.blocks.write(hook as u64, mem::transmute_copy(&split));
                 }
 
-                // TODO: the problem is that the hook is 353 but the first in the clusterchain is
-                // also this, it looks like it has a problem allocating new addresses
-                log!("chaining the clusters: {}", hook);
-
+                // we get the address that we set as the next from here
+                // TODO: the hook we pass in here is wrong lol
                 let addr = self.chain_cluster(data, hook)?;
 
                 log!("cluster chain: {}", addr);
@@ -281,6 +300,8 @@ impl Fs {
 
                     log!("done reading");
 
+                    log!("new cluster: {:?}", cluster.next);
+
                     loop {}
                 },
                 None => {
@@ -293,9 +314,13 @@ impl Fs {
     fn chain_cluster(&mut self, data: &[u8], hook: u32) -> Result<u32, Error> {
         let zones = iter::repeat_with(|| self.zmap.alloc()).take((data.len() / 500) + 1).collect::<Vec<Result<u32, Error>>>();
 
+        log!("[chaincluster] zones: {:?}", zones);
+
         for (index, bytes) in data.chunks(500).enumerate() {
             let next = (index < zones.len() - 1).then(|| zones[index + 1].expect("internal error")).or_else(|| Some(hook));
             let cluster = Cluster::new(next, bytes);
+
+            log!("[chaincluster] chaining new cluster: {:?}", cluster);
 
             unsafe {
                 self.blocks.write(zones[index]? as u64, mem::transmute_copy(&cluster));
