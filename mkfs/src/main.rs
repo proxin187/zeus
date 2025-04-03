@@ -23,7 +23,7 @@ pub struct Header {
 pub struct Cluster {
     next: Option<u32>,
     len: u32,
-    data: [u8; 492],
+    data: [u8; 500],
 }
 
 #[repr(C)]
@@ -57,7 +57,7 @@ impl<'a> Mkfs<'a> {
 
     fn cluster(&mut self, absolute: &str) -> Result<u32, Box<dyn std::error::Error>> {
         let bytes = fs::read(absolute)?;
-        let chunks = bytes.chunks(492);
+        let chunks = bytes.chunks(500);
         let total = chunks.len();
 
         let cluster = self.cluster;
@@ -65,7 +65,7 @@ impl<'a> Mkfs<'a> {
         for (index, mut chunk) in chunks.map(|chunk| chunk.to_vec()).enumerate() {
             let len = chunk.len() as u32;
 
-            chunk.resize(492, 0);
+            chunk.resize(500, 0);
 
             let cluster = Cluster {
                 next: (index + 1 < total).then(|| self.cluster + 1),

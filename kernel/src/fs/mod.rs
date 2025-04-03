@@ -174,11 +174,12 @@ impl Fs {
         while let Some(addr) = cluster.next {
             self.zmap.set(addr, true);
 
-            cluster = decode!(&self.blocks.read(addr as u64));
+            log!("addr: {}", addr);
 
-            // TODO: the cluster seems to be corrupted, it points in circles, this must be a
-            // problem within the mkfs implementation
-            log!("cluster: {:?}, addr: {}", cluster, addr);
+            // TODO: it seems writing to a file somehow corrupts the clusters when writting to it lol, its not
+            // undefined behaviour, its just something wrong when writting
+
+            cluster = decode!(&self.blocks.read(addr as u64));
         }
     }
 
@@ -258,19 +259,25 @@ impl Fs {
     fn write_cluster(&mut self, mut cluster: Cluster, mut cluster_addr: u32, offset: u32, data: &[u8]) -> Result<(), Error> {
         let mut count: u32 = 0;
 
+        log!("[write_cluster] cluster: {:?}, addr: {}", cluster, cluster_addr);
+
         loop {
             if offset >= count && offset < count + cluster.len {
                 let hook = self.zmap.alloc()?;
 
+                // | start cluster | new clusters | split aka rest of the start cluster |
+
+                // the split is written at the address of the hook, the split is put after the 
                 let split = Cluster::new(cluster.next, &cluster.data[offset as usize - count as usize..]);
 
                 log!("split: {:?}", split);
+                log!("hook: {}", hook);
 
                 // TODO: the problem now is that the clusters hook to eachother, creating an
                 // infinite loop
 
                 unsafe {
-                    self.blocks.write(hook as u64, mem::transmute_copy(&split));
+                    // self.blocks.write(hook as u64, mem::transmute_copy(&split));
                 }
 
                 // we get the address that we set as the next from here
@@ -282,7 +289,7 @@ impl Fs {
                 cluster.next = Some(addr);
 
                 unsafe {
-                    self.blocks.write(cluster_addr as u64, mem::transmute_copy(&cluster));
+                    // self.blocks.write(cluster_addr as u64, mem::transmute_copy(&cluster));
                 }
 
                 log!("done with writing new cluster");
@@ -323,7 +330,7 @@ impl Fs {
             log!("[chaincluster] chaining new cluster: {:?}", cluster);
 
             unsafe {
-                self.blocks.write(zones[index]? as u64, mem::transmute_copy(&cluster));
+                // self.blocks.write(zones[index]? as u64, mem::transmute_copy(&cluster));
             }
         }
 
