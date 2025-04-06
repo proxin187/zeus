@@ -51,14 +51,16 @@ pub struct Cluster {
 }
 
 impl Cluster {
-    pub fn new(next: Option<u32>, bytes: &[u8]) -> Cluster {
+    pub fn new(next: Option<u32>, bytes: &[u8], len: u32) -> Cluster {
         let mut data: [u8; 500] = [0; 500];
 
-        data[0..bytes.len()].copy_from_slice(&bytes);
+        if bytes.len() > 0 {
+            data[0..bytes.len()].copy_from_slice(&bytes);
+        }
 
         Cluster {
             next,
-            len: bytes.len() as u32,
+            len,
             data,
         }
     }
@@ -108,43 +110,34 @@ impl Blocks {
 }
 
 pub struct ZMap {
-    bitmap: Vec<u32>,
+    zones: Vec<bool>,
 }
 
 impl ZMap {
     pub fn new(len: usize) -> ZMap {
         // | header (1 sector) | directory table (256 sectors) | clusters |
-        let mut bitmap = vec![0xffffffff; 11];
+        let mut zones = vec![true; 257];
 
-        let clusters = vec![0; len - 5];
-
-        bitmap.extend(clusters);
+        zones.extend(vec![false; len]);
 
         ZMap {
-            bitmap,
+            zones,
         }
     }
 
     pub fn set(&mut self, zone: u32, status: bool) {
-        if status {
-            self.bitmap[zone as usize / 32] |= 0b1 << (zone & 0b11111);
-        } else {
-            self.bitmap[zone as usize / 32] &= !(0b1 << (zone & 0b11111));
-        }
+        self.zones[zone as usize] = status;
     }
 
     pub fn alloc(&mut self) -> Result<u32, Error> {
-        for index in 0..self.bitmap.len() {
-            if self.bitmap[index] != u32::MAX {
-                let zone = index as u32 * 32 + self.bitmap[index].leading_ones() + 31;
+        match self.zones.iter().enumerate().find(|(_, zone)| **zone == false) {
+            Some((index, _)) => {
+                self.zones[index] = true;
 
-                self.set(zone, true);
-
-                return Ok(zone);
-            }
+                Ok(index as u32)
+            },
+            None => Err(Error::LimitedSpace),
         }
-
-        Err(Error::LimitedSpace)
     }
 }
 
@@ -174,10 +167,7 @@ impl Fs {
         while let Some(addr) = cluster.next {
             self.zmap.set(addr, true);
 
-            log!("addr: {}", addr);
-
-            // TODO: it seems writing to a file somehow corrupts the clusters when writting to it lol, its not
-            // undefined behaviour, its just something wrong when writting
+            log!("zone: {}", addr);
 
             cluster = decode!(&self.blocks.read(addr as u64));
         }
@@ -196,6 +186,8 @@ impl Fs {
 
                 if let Some(zone) = entry.addr {
                     self.zmap.set(zone, true);
+
+                    log!("zone: {}", zone);
 
                     let cluster = decode!(&self.blocks.read(zone as u64));
 
@@ -232,8 +224,6 @@ impl Fs {
         let mut buf: Vec<u8> = Vec::new();
 
         loop {
-            // TODO: this is a quick and easy solution, but im sure that you can find a generic function
-            // that applies to all cases
             if range.start >= count && range.start < count + cluster.len {
                 if range.end >= count && range.end < count + cluster.len {
                     buf.extend(&cluster.data[range.start as usize..range.end as usize]);
@@ -247,7 +237,7 @@ impl Fs {
 
                 return Ok(buf);
             } else if range.start < count && range.end >= count {
-                buf.extend(&cluster.data);
+                buf.extend(&cluster.data[..cluster.len as usize]);
             }
 
             count += cluster.len;
@@ -259,40 +249,25 @@ impl Fs {
     fn write_cluster(&mut self, mut cluster: Cluster, mut cluster_addr: u32, offset: u32, data: &[u8]) -> Result<(), Error> {
         let mut count: u32 = 0;
 
-        log!("[write_cluster] cluster: {:?}, addr: {}", cluster, cluster_addr);
-
         loop {
             if offset >= count && offset < count + cluster.len {
                 let hook = self.zmap.alloc()?;
 
-                // | start cluster | new clusters | split aka rest of the start cluster |
-
-                // the split is written at the address of the hook, the split is put after the 
-                let split = Cluster::new(cluster.next, &cluster.data[offset as usize - count as usize..]);
-
-                log!("split: {:?}", split);
-                log!("hook: {}", hook);
-
-                // TODO: the problem now is that the clusters hook to eachother, creating an
-                // infinite loop
+                let split = Cluster::new(cluster.next, &cluster.data[offset as usize - count as usize..], cluster.len - (offset - count).min(cluster.len));
 
                 unsafe {
-                    // self.blocks.write(hook as u64, mem::transmute_copy(&split));
+                    self.blocks.write(hook as u64, mem::transmute_copy(&split));
                 }
 
-                // we get the address that we set as the next from here
-                // TODO: the hook we pass in here is wrong lol
-                let addr = self.chain_cluster(data, hook)?;
+                let chain = self.chain_cluster(data, hook)?;
 
-                log!("cluster chain: {}", addr);
-
-                cluster.next = Some(addr);
+                cluster = Cluster::new(Some(chain), &cluster.data[..offset as usize - count as usize], offset - count);
 
                 unsafe {
-                    // self.blocks.write(cluster_addr as u64, mem::transmute_copy(&cluster));
+                    self.blocks.write(cluster_addr as u64, mem::transmute_copy(&cluster));
                 }
 
-                log!("done with writing new cluster");
+                return Ok(());
             }
 
             count += cluster.len;
@@ -301,18 +276,10 @@ impl Fs {
                 Some(next) => {
                     cluster_addr = next;
 
-                    log!("reading now: {}", cluster_addr);
-
                     cluster = decode!(&self.blocks.read(cluster_addr as u64));
-
-                    log!("done reading");
-
-                    log!("new cluster: {:?}", cluster.next);
-
-                    loop {}
                 },
                 None => {
-                    return Ok(());
+                    return Err(Error::OutOfBounds);
                 },
             }
         }
@@ -321,20 +288,35 @@ impl Fs {
     fn chain_cluster(&mut self, data: &[u8], hook: u32) -> Result<u32, Error> {
         let zones = iter::repeat_with(|| self.zmap.alloc()).take((data.len() / 500) + 1).collect::<Vec<Result<u32, Error>>>();
 
-        log!("[chaincluster] zones: {:?}", zones);
-
         for (index, bytes) in data.chunks(500).enumerate() {
             let next = (index < zones.len() - 1).then(|| zones[index + 1].expect("internal error")).or_else(|| Some(hook));
-            let cluster = Cluster::new(next, bytes);
-
-            log!("[chaincluster] chaining new cluster: {:?}", cluster);
+            let cluster = Cluster::new(next, bytes, bytes.len() as u32);
 
             unsafe {
-                // self.blocks.write(zones[index]? as u64, mem::transmute_copy(&cluster));
+                self.blocks.write(zones[index]? as u64, mem::transmute_copy(&cluster));
             }
         }
 
         Ok(zones[0]?)
+    }
+
+    fn defrag(&mut self, mut cluster: Cluster) {
+        // TODO: implement a defragmentation algorithm to prevent excessive fragmentation
+    }
+
+    fn dump_cluster(&mut self, mut cluster: Cluster) {
+        loop {
+            log!("cluster: {:?}", cluster);
+
+            match cluster.next {
+                Some(next) => {
+                    cluster = decode!(&self.blocks.read(next as u64));
+                },
+                None => {
+                    break;
+                },
+            }
+        }
     }
 
     fn query(&self, path: [u8; 56]) -> Result<u32, Error> {
@@ -379,7 +361,9 @@ pub fn init(block: VirtioBlk) {
 
             fs.write_cluster(decode!(&block), addr, 40, &[104, 111, 109, 101]).unwrap();
 
-            log!("done writing cluster");
+            let block = fs.blocks.read(addr as u64);
+
+            fs.dump_cluster(decode!(&block));
 
             let bytes = fs.read_cluster(decode!(&block), 38..100).unwrap();
 

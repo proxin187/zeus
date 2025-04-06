@@ -7,6 +7,7 @@
 #![feature(naked_functions)]
 #![feature(ptr_as_ref_unchecked)]
 #![feature(iter_array_chunks)]
+#![feature(iter_map_windows)]
 #![feature(allocator_api)]
 
 extern crate alloc;
