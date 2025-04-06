@@ -329,6 +329,20 @@ impl Fs {
         }
     }
 
+    pub fn read(&mut self, path: [u8; 56], range: Range<u32>) -> Result<Vec<u8>, Error> {
+        let addr = self.query(path)?;
+        let block = self.blocks.read(addr as u64);
+
+        self.read_cluster(decode!(&block), range)
+    }
+
+    pub fn write(&mut self, path: [u8; 56], offset: u32, data: &[u8]) -> Result<(), Error> {
+        let addr = self.query(path)?;
+        let block = self.blocks.read(addr as u64);
+
+        self.write_cluster(decode!(&block), addr, offset, data)
+    }
+
     pub fn touch(&mut self, path: &str) {
     }
 

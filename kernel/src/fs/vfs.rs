@@ -3,18 +3,19 @@ use crate::drivers::virtio::blk::VirtioBlk;
 use super::{Fs, Error};
 
 use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 
 
 pub struct Descriptor {
     name: [u8; 56],
-    offset: usize,
+    offset: u32,
 }
 
 impl Descriptor {
-    pub fn new(name: [u8; 56]) -> Descriptor {
+    pub fn new(name: [u8; 56], offset: u32) -> Descriptor {
         Descriptor {
             name,
-            offset: 0,
+            offset,
         }
     }
 }
@@ -26,9 +27,15 @@ pub struct Vfs {
 
 impl Vfs {
     pub fn new(driver: VirtioBlk) -> Vfs {
+        let mut descriptors = BTreeMap::new();
+
+        descriptors.insert(u32::MIN, Descriptor::new([0; 56], 0));
+
+        descriptors.insert(u32::MAX, Descriptor::new([0; 56], 0));
+
         Vfs {
             fs: Fs::new(driver),
-            descriptors: BTreeMap::new(),
+            descriptors,
         }
     }
 
@@ -39,16 +46,28 @@ impl Vfs {
             .next()
             .ok_or(Error::OutOfFd)?;
 
-        self.descriptors.insert(fd, Descriptor::new());
+        self.descriptors.insert(fd, Descriptor::new(name, 0));
 
         Ok(fd)
     }
 
-    pub fn read(&mut self, fd: u32) -> Result<(), Error> {
-        match self.descriptors.get(&fd) {
+    pub fn seek(&mut self, fd: u32, offset: u32) -> Result<(), Error> {
+        match self.descriptors.get_mut(&fd) {
             Some(descriptor) => {
+                descriptor.offset = offset;
 
                 Ok(())
+            },
+            None => Err(Error::NoSuchFd),
+        }
+    }
+
+    pub fn read(&mut self, fd: u32, bytes: u32) -> Result<Vec<u8>, Error> {
+        match self.descriptors.get_mut(&fd) {
+            Some(descriptor) => {
+                descriptor.offset += bytes;
+
+                self.fs.read(descriptor.name, descriptor.offset - bytes..descriptor.offset)
             },
             None => Err(Error::NoSuchFd),
         }
