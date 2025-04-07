@@ -20,6 +20,8 @@ mod memory;
 mod cpu;
 mod fs;
 
+use fs::vfs;
+
 use core::arch::{asm, naked_asm};
 use core::panic::PanicInfo;
 use core::ptr::addr_of;
@@ -67,31 +69,13 @@ pub unsafe fn kmain() -> ! {
 
     memory::init();
 
-    let mut devices = drivers::virtio::probe();
+    let devices = drivers::virtio::probe();
 
     log!("devices: {:#x?}", devices);
 
-    /*
-    let read = devices.read_blk(0).unwrap();
-
-    log!("read: {:?}", alloc::string::String::from_utf8_lossy(&read));
-
-    let mut data = [0; 512];
-
-    data[0..3].copy_from_slice(&[76, 79, 76]);
-
-    devices.write_blk(0, data).unwrap();
-
-    let read = devices.read_blk(0).unwrap();
-
-    log!("read: {:?}", alloc::string::String::from_utf8_lossy(&read));
-    */
-
-    // TODO: we should probably make the devices struct just hold the block device without an
-    // option
     match devices.block {
         Some(block) => {
-            fs::init(block);
+            vfs::init(block);
         },
         None => {
             panic!("no block device found");

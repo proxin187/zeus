@@ -1,5 +1,5 @@
+pub mod vfs;
 mod error;
-mod vfs;
 
 use error::Error;
 
@@ -10,15 +10,11 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use alloc::vec;
 
-use core::cell::OnceCell;
 use core::ops::Range;
 use core::iter;
 use core::mem;
 use core::ptr;
 
-use spin::Mutex;
-
-static FILE_SYSTEM: Mutex<OnceCell<Fs>> = Mutex::new(OnceCell::new());
 
 macro_rules! decode {
     ($value:expr) => {
@@ -350,42 +346,6 @@ impl Fs {
     }
 
     pub fn list(&mut self, path: &str) {
-    }
-}
-
-pub fn init(block: VirtioBlk) {
-    FILE_SYSTEM.lock().get_or_init(|| Fs::new(block));
-
-    let mut path: [u8; 56] = [0; 56];
-
-    // /home/proxin/test.txt
-    path[0..21].copy_from_slice(&[47, 104, 111, 109, 101, 47, 112, 114, 111, 120, 105, 110, 47, 116, 101, 115, 116, 46, 116, 120, 116]);
-
-    let mut lock = FILE_SYSTEM.lock();
-
-    let fs = lock.get_mut().unwrap();
-
-    match fs.query(path) {
-        Ok(addr) => {
-            let block = fs.blocks.read(addr as u64);
-
-            let bytes = fs.read_cluster(decode!(&block), 38..100).unwrap();
-
-            log!("bytes: {:?}", alloc::string::String::from_utf8_lossy(&bytes));
-
-            fs.write_cluster(decode!(&block), addr, 40, &[104, 111, 109, 101]).unwrap();
-
-            let block = fs.blocks.read(addr as u64);
-
-            fs.dump_cluster(decode!(&block));
-
-            let bytes = fs.read_cluster(decode!(&block), 38..100).unwrap();
-
-            log!("bytes: {:?}", alloc::string::String::from_utf8_lossy(&bytes));
-        },
-        Err(err) => {
-            log!("failed to query: {:?}", err);
-        },
     }
 }
 

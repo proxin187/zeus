@@ -35,38 +35,6 @@ impl Devices {
             block: None,
         }
     }
-
-    fn is_filled(&self) -> bool {
-        self.block.is_some()
-    }
-
-    pub fn read_blk(&mut self, sector: u64) -> Result<[u8; 512], Error> {
-        let buffer: [u8; 512] = [0; 512];
-
-        match &mut self.block {
-            Some(block) => {
-                unsafe {
-                    block.blk_op(Mode::Read, &buffer as *const [u8; 512] as *mut [u8; 512], sector).map(|()| buffer)
-                }
-            },
-            None => {
-                panic!("block device unavailable");
-            },
-        }
-    }
-
-    pub fn write_blk(&mut self, sector: u64, buffer: [u8; 512]) -> Result<(), Error> {
-        match &mut self.block {
-            Some(block) => {
-                unsafe {
-                    block.blk_op(Mode::Write, &buffer as *const [u8; 512] as *mut [u8; 512], sector)
-                }
-            },
-            None => {
-                panic!("block device unavailable");
-            },
-        }
-    }
 }
 
 pub enum DeviceType {
@@ -142,16 +110,7 @@ pub fn probe() -> Devices {
                 DeviceType::BlockDevice => {
                     log!("{:x?}: virtio-blk device found", device);
 
-                    let device = unsafe { VirtioBlk::new(device) };
-
-                    match &devices.block {
-                        Some(device) => {
-                            log!("duplicate block device: {:?}", device);
-                        },
-                        None => {
-                            devices.block = Some(device);
-                        },
-                    }
+                    devices.block = Some(unsafe { VirtioBlk::new(device) });
                 },
                 DeviceType::GpuDevice => {
                     log!("{:x?}: gpu device ignored", device);
@@ -166,11 +125,7 @@ pub fn probe() -> Devices {
         }
     }
 
-    if devices.is_filled() {
-        devices
-    } else {
-        panic!("failed to find required virtio devices");
-    }
+    devices
 }
 
 

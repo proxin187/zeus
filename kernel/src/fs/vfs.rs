@@ -2,8 +2,14 @@ use crate::drivers::virtio::blk::VirtioBlk;
 
 use super::{Fs, Error};
 
+use core::cell::OnceCell;
+
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
+
+use spin::Mutex;
+
+static VFS: Mutex<OnceCell<Vfs>> = Mutex::new(OnceCell::new());
 
 
 pub struct Descriptor {
@@ -71,6 +77,28 @@ impl Vfs {
             },
             None => Err(Error::NoSuchFd),
         }
+    }
+
+    pub fn write(&mut self, fd: u32, bytes: &[u8]) -> Result<(), Error> {
+        match self.descriptors.get_mut(&fd) {
+            Some(descriptor) => {
+                descriptor.offset += bytes.len() as u32;
+
+                self.fs.write(descriptor.name, descriptor.offset - bytes.len() as u32, bytes)
+            },
+            None => Err(Error::NoSuchFd),
+        }
+    }
+}
+
+pub fn init(block: VirtioBlk) {
+    VFS.lock().get_or_init(|| Vfs::new(block));
+}
+
+pub fn lock<T, F: Fn(&mut Vfs) -> Result<T, Error>>(f: F) -> Result<T, Error> {
+    match VFS.lock().get_mut() {
+        Some(vfs) => f(vfs),
+        None => panic!("virtual file system is uninitialized"),
     }
 }
 

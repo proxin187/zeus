@@ -1,5 +1,8 @@
 use crate::exception::{__trap_frame, TrapFrame};
 use crate::{write_csr, log, process};
+use crate::fs::vfs;
+
+use core::slice;
 
 
 #[derive(Debug)]
@@ -27,6 +30,13 @@ pub fn syscall(trapframe: &TrapFrame) {
 
     match syscall {
         Syscall::Write => {
+            let status = vfs::lock(|vfs| {
+                let bytes = unsafe { slice::from_raw_parts(trapframe.regs[10] as *const u8, trapframe.regs[11] as usize) };
+
+                vfs.write(trapframe.regs[12] as u32, bytes)
+            });
+
+            // TODO: return the status to the caller
         },
         Syscall::Read => {
         },
