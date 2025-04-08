@@ -15,13 +15,20 @@ impl Uart {
             uart: 0x10000000 as *mut u8,
         }
     }
+
+    pub fn read(&mut self) -> Option<u8> {
+        unsafe {
+            (self.uart.add(5).read_volatile() & 1 != 0)
+                .then(|| self.uart.read_volatile())
+        }
+    }
 }
 
 impl fmt::Write for Uart {
     fn write_str(&mut self, string: &str) -> fmt::Result {
         for byte in string.bytes() {
             unsafe {
-                *UART.uart = byte;
+                UART.uart.write_volatile(byte);
             }
         }
 

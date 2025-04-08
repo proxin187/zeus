@@ -17,6 +17,7 @@ mod drivers;
 mod process;
 mod syscall;
 mod memory;
+mod shell;
 mod cpu;
 mod fs;
 
@@ -81,8 +82,6 @@ pub unsafe fn kmain() -> ! {
             panic!("no block device found");
         },
     }
-
-    loop {}
 
     process::spawn("init", init_proc as u64);
     process::spawn("proc2", proc2 as u64);

@@ -36,9 +36,25 @@ pub fn syscall(trapframe: &TrapFrame) {
                 vfs.write(trapframe.regs[12] as u32, bytes)
             });
 
-            // TODO: return the status to the caller
+            unsafe {
+                __trap_frame.regs[10] = status.map_err(|err| err as u64).err().unwrap_or(0);
+            }
         },
         Syscall::Read => {
+            match vfs::lock(|vfs| vfs.read(trapframe.regs[10] as u32, trapframe.regs[11] as u32)) {
+                Ok(bytes) => {
+                    unsafe {
+                        __trap_frame.regs[10] = 0;
+
+                        __trap_frame.regs[11] = bytes.leak() as *mut [u8] as *const u8 as u64;
+                    }
+                },
+                Err(err) => {
+                    unsafe {
+                        __trap_frame.regs[10] = err as u64;
+                    }
+                },
+            }
         },
         Syscall::Exit => {
             let context = process::exit();

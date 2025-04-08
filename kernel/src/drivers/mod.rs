@@ -1,5 +1,5 @@
 pub mod virtio;
-mod uart;
+pub mod uart;
 
 use core::fmt;
 
