@@ -1,10 +1,10 @@
 use crate::drivers::uart;
 use crate::log;
 
-use core::arch::asm;
-use core::iter;
-
 use alloc::string::String;
+use alloc::vec::Vec;
+
+use core::fmt::Write;
 
 
 pub struct Shell {
@@ -19,18 +19,36 @@ impl Shell {
     }
 
     fn command(&self) -> String {
-        let bytes = iter::repeat_with(|| unsafe { uart::UART.read() })
-            .filter_map(|byte| byte.map(|byte| byte as char))
-            .take_while(|read| *read != '\n');
+        let mut bytes: Vec<char> = Vec::new();
 
-        bytes.collect()
+        unsafe {
+            let _ = write!(uart::UART, "[shell]$ ");
+        }
+
+        while !bytes.ends_with(&['\n']) {
+            if let Some(byte) = unsafe { uart::UART.read() } {
+                unsafe {
+                    uart::UART.write(byte);
+                }
+
+                bytes.push(byte as char);
+            }
+        }
+
+        bytes.iter().filter(|byte| **byte != '\n').collect()
     }
 
     pub fn run(&mut self) -> ! {
         log!("welcome to dnb shell");
 
         loop {
-            let command = self.command();
+            match self.command().as_str() {
+                "help" => {
+                    log!("dnb shell, version 0.1");
+                },
+                command => {
+                },
+            }
         }
     }
 }

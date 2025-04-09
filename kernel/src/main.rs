@@ -83,8 +83,12 @@ pub unsafe fn kmain() -> ! {
         },
     }
 
+    /*
     process::spawn("init", init_proc as u64);
     process::spawn("proc2", proc2 as u64);
+    */
+
+    process::spawn("shell", shell::entry as u64);
 
     exception::enter_user();
 

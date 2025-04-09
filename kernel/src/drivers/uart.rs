@@ -22,14 +22,19 @@ impl Uart {
                 .then(|| self.uart.read_volatile())
         }
     }
+
+    #[inline]
+    pub fn write(&mut self, byte: u8) {
+        unsafe {
+            UART.uart.write_volatile(byte);
+        }
+    }
 }
 
 impl fmt::Write for Uart {
     fn write_str(&mut self, string: &str) -> fmt::Result {
         for byte in string.bytes() {
-            unsafe {
-                UART.uart.write_volatile(byte);
-            }
+            self.write(byte);
         }
 
         Ok(())
