@@ -1,10 +1,12 @@
 use crate::drivers::virtio::blk::VirtioBlk;
+use crate::drivers::uart;
 
-use super::{Fs, Error};
+use super::{Fs, FS, Error};
 
 use core::cell::OnceCell;
 
 use alloc::collections::BTreeMap;
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use spin::Mutex;
@@ -12,35 +14,85 @@ use spin::Mutex;
 static VFS: Mutex<OnceCell<Vfs>> = Mutex::new(OnceCell::new());
 
 
-pub struct Descriptor {
+trait Descriptor {
+    fn write(&mut self, bytes: &[u8]) -> Result<(), Error>;
+    fn read(&mut self, bytes: u32) -> Result<Vec<u8>, Error>;
+    fn seek(&mut self, offset: u32);
+}
+
+pub struct Fd {
     name: [u8; 56],
     offset: u32,
 }
 
-impl Descriptor {
-    pub fn new(name: [u8; 56], offset: u32) -> Descriptor {
-        Descriptor {
+impl Fd {
+    pub fn new(name: [u8; 56], offset: u32) -> Fd {
+        Fd {
             name,
             offset,
         }
     }
 }
 
+impl Descriptor for Fd {
+    fn write(&mut self, bytes: &[u8]) -> Result<(), Error> {
+        self.offset += bytes.len() as u32;
+
+        let mut lock = FS.lock();
+
+        lock.get_mut()
+            .expect("uninitialized file system")
+            .write(self.name, self.offset - bytes.len() as u32, bytes)
+    }
+
+    fn read(&mut self, bytes: u32) -> Result<Vec<u8>, Error> {
+        self.offset += bytes;
+
+        let mut lock = FS.lock();
+
+        lock.get_mut()
+            .expect("uninitialized file system")
+            .read(self.name, self.offset - bytes..self.offset)
+    }
+
+    fn seek(&mut self, offset: u32) {
+        self.offset = offset;
+    }
+}
+
+pub struct Stdout;
+
+impl Descriptor for Stdout {
+    fn write(&mut self, bytes: &[u8]) -> Result<(), Error> {
+        for byte in bytes {
+            unsafe {
+                uart::UART.write(*byte);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn read(&mut self, _: u32) -> Result<Vec<u8>, Error> {
+        todo!("read from stdin");
+    }
+
+    fn seek(&mut self, _: u32) {}
+}
+
 pub struct Vfs {
-    fs: Fs,
-    descriptors: BTreeMap<u32, Descriptor>,
+    descriptors: BTreeMap<u32, Box<dyn Descriptor + Send + Sync>>,
 }
 
 impl Vfs {
-    pub fn new(driver: VirtioBlk) -> Vfs {
-        let mut descriptors = BTreeMap::new();
+    pub fn new() -> Vfs {
+        let mut descriptors: BTreeMap<u32, Box<dyn Descriptor + Send + Sync>> = BTreeMap::new();
 
-        descriptors.insert(u32::MIN, Descriptor::new([0; 56], 0));
+        descriptors.insert(0, Box::new(Stdout));
 
-        descriptors.insert(u32::MAX, Descriptor::new([0; 56], 0));
+        descriptors.insert(u32::MAX, Box::new(Fd::new([0; 56], 0)));
 
         Vfs {
-            fs: Fs::new(driver),
             descriptors,
         }
     }
@@ -52,7 +104,7 @@ impl Vfs {
             .next()
             .ok_or(Error::OutOfFd)?;
 
-        self.descriptors.insert(fd, Descriptor::new(name, 0));
+        self.descriptors.insert(fd, Box::new(Fd::new(name, 0)));
 
         Ok(fd)
     }
@@ -60,7 +112,7 @@ impl Vfs {
     pub fn seek(&mut self, fd: u32, offset: u32) -> Result<(), Error> {
         match self.descriptors.get_mut(&fd) {
             Some(descriptor) => {
-                descriptor.offset = offset;
+                descriptor.seek(offset);
 
                 Ok(())
             },
@@ -70,29 +122,23 @@ impl Vfs {
 
     pub fn read(&mut self, fd: u32, bytes: u32) -> Result<Vec<u8>, Error> {
         match self.descriptors.get_mut(&fd) {
-            Some(descriptor) => {
-                descriptor.offset += bytes;
-
-                self.fs.read(descriptor.name, descriptor.offset - bytes..descriptor.offset)
-            },
+            Some(descriptor) => descriptor.read(bytes),
             None => Err(Error::NoSuchFd),
         }
     }
 
     pub fn write(&mut self, fd: u32, bytes: &[u8]) -> Result<(), Error> {
         match self.descriptors.get_mut(&fd) {
-            Some(descriptor) => {
-                descriptor.offset += bytes.len() as u32;
-
-                self.fs.write(descriptor.name, descriptor.offset - bytes.len() as u32, bytes)
-            },
+            Some(descriptor) => descriptor.write(bytes),
             None => Err(Error::NoSuchFd),
         }
     }
 }
 
-pub fn init(block: VirtioBlk) {
-    VFS.lock().get_or_init(|| Vfs::new(block));
+pub fn init(driver: VirtioBlk) {
+    FS.lock().get_or_init(|| Fs::new(driver));
+
+    VFS.lock().get_or_init(|| Vfs::new());
 }
 
 pub fn lock<T, F: Fn(&mut Vfs) -> Result<T, Error>>(f: F) -> Result<T, Error> {

@@ -10,10 +10,15 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use alloc::vec;
 
+use core::cell::OnceCell;
 use core::ops::Range;
 use core::iter;
 use core::mem;
 use core::ptr;
+
+use spin::Mutex;
+
+static FS: Mutex<OnceCell<Fs>> = Mutex::new(OnceCell::new());
 
 
 macro_rules! decode {
@@ -347,6 +352,10 @@ impl Fs {
 
     pub fn list(&mut self, path: &str) {
     }
+}
+
+pub fn init(block: VirtioBlk) {
+    FS.lock().get_or_init(|| Fs::new(block));
 }
 
 

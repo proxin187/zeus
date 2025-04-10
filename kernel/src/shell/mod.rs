@@ -19,6 +19,7 @@ impl Shell {
     }
 
     fn command(&self) -> String {
+        // TODO: decide wether we port the rust std or make our own
         let mut bytes: Vec<char> = Vec::new();
 
         unsafe {
