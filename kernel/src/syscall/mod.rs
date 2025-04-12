@@ -30,6 +30,8 @@ pub fn syscall(trapframe: &TrapFrame) {
 
     match syscall {
         Syscall::Write => {
+            // a0: addr, a1: len, a2: fd
+
             let status = vfs::lock(|vfs| {
                 let bytes = unsafe { slice::from_raw_parts(trapframe.regs[10] as *const u8, trapframe.regs[11] as usize) };
 
@@ -41,6 +43,8 @@ pub fn syscall(trapframe: &TrapFrame) {
             }
         },
         Syscall::Read => {
+            // a0: fd, a1: len
+
             match vfs::lock(|vfs| vfs.read(trapframe.regs[10] as u32, trapframe.regs[11] as u32)) {
                 Ok(bytes) => {
                     unsafe {

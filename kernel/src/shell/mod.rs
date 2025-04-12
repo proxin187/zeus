@@ -23,10 +23,10 @@ impl Shell {
         let mut bytes: Vec<char> = Vec::new();
 
         unsafe {
-            let _ = write!(uart::UART, "[shell]$ ");
+            let _ = write!(uart::UART, "\n[shell]$ ");
         }
 
-        while !bytes.ends_with(&['\n']) {
+        while !bytes.ends_with(&['\n']) && !bytes.ends_with(&['\r']) {
             if let Some(byte) = unsafe { uart::UART.read() } {
                 unsafe {
                     uart::UART.write(byte);
@@ -36,14 +36,18 @@ impl Shell {
             }
         }
 
-        bytes.iter().filter(|byte| **byte != '\n').collect()
+        bytes.iter().filter(|byte| **byte != '\r').collect()
     }
 
     pub fn run(&mut self) -> ! {
         log!("welcome to dnb shell");
 
         loop {
-            match self.command().as_str() {
+            let command = self.command();
+
+            log!("command: {:?}", command);
+
+            match command.as_str() {
                 "help" => {
                     log!("dnb shell, version 0.1");
                 },
