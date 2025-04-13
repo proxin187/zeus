@@ -11,5 +11,6 @@ panic ="abort"
 
 [dependencies]
 spin = "0.9.8"
+stdlib = { path = "../stdlib" }
 
 

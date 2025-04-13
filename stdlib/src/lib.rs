@@ -1,11 +1,25 @@
 #![no_std]
 
-mod sys;
-mod fs;
+pub mod error;
+pub mod sys;
+pub mod fs;
+pub mod io;
 
 
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+#[macro_export]
+macro_rules! println {
+    ($($arg:tt)*) => {
+        let _ = crate::io::_print(format_args!($($arg)*));
+
+        let _ = crate::io::_print(format_args!("\n"));
+    };
+}
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {
+        let _ = crate::io::_print(format_args!($($arg)*));
+    };
 }
 
 

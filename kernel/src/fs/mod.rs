@@ -1,7 +1,4 @@
 pub mod vfs;
-mod error;
-
-use error::Error;
 
 use crate::drivers::virtio::blk::{VirtioBlk, Mode};
 use crate::log;
@@ -17,6 +14,7 @@ use core::mem;
 use core::ptr;
 
 use spin::Mutex;
+use stdlib::error::Error;
 
 static FS: Mutex<OnceCell<Fs>> = Mutex::new(OnceCell::new());
 

@@ -1,7 +1,7 @@
 use crate::drivers::virtio::blk::VirtioBlk;
 use crate::drivers::uart;
 
-use super::{Fs, FS, Error};
+use super::{Fs, FS};
 
 use core::cell::OnceCell;
 
@@ -9,6 +9,7 @@ use alloc::collections::BTreeMap;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
+use stdlib::error::Error;
 use spin::Mutex;
 
 static VFS: Mutex<OnceCell<Vfs>> = Mutex::new(OnceCell::new());
@@ -60,9 +61,9 @@ impl Descriptor for Fd {
     }
 }
 
-pub struct Stdout;
+pub struct Stdio;
 
-impl Descriptor for Stdout {
+impl Descriptor for Stdio {
     fn write(&mut self, bytes: &[u8]) -> Result<(), Error> {
         for byte in bytes {
             unsafe {
@@ -80,6 +81,20 @@ impl Descriptor for Stdout {
     fn seek(&mut self, _: u32) {}
 }
 
+pub struct Barrier;
+
+impl Descriptor for Barrier {
+    fn write(&mut self, bytes: &[u8]) -> Result<(), Error> {
+        Err(Error::Barrier)
+    }
+
+    fn read(&mut self, _: u32) -> Result<Vec<u8>, Error> {
+        Err(Error::Barrier)
+    }
+
+    fn seek(&mut self, _: u32) {}
+}
+
 pub struct Vfs {
     descriptors: BTreeMap<u32, Box<dyn Descriptor + Send + Sync>>,
 }
@@ -88,9 +103,9 @@ impl Vfs {
     pub fn new() -> Vfs {
         let mut descriptors: BTreeMap<u32, Box<dyn Descriptor + Send + Sync>> = BTreeMap::new();
 
-        descriptors.insert(0, Box::new(Stdout));
+        descriptors.insert(0, Box::new(Stdio));
 
-        descriptors.insert(u32::MAX, Box::new(Fd::new([0; 56], 0)));
+        descriptors.insert(u32::MAX, Box::new(Barrier));
 
         Vfs {
             descriptors,

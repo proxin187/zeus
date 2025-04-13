@@ -9,6 +9,7 @@ zeus is an minimalistic operating system for riscv64.
  - Homemade virtio device drivers
  - Custom file system (TNDFS)
  - Builtin shell (dnb shell)
+ - Custom standard library (the kernel itself depends on the stdlib)
 
 
 ## License
