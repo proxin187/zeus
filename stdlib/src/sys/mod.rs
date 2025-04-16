@@ -2,6 +2,8 @@ use crate::error::Error;
 
 use core::arch::asm;
 
+pub const STDIO: u32 = 0;
+
 
 #[inline]
 pub unsafe fn write(fd: u32, len: u32, addr: *const u8) -> Result<(), Error> {

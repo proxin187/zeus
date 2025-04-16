@@ -12,7 +12,7 @@ impl Stdio {
 impl core::fmt::Write for Stdio {
     fn write_str(&mut self, string: &str) -> core::fmt::Result {
         unsafe {
-            if let Err(err) = sys::write(0, string.len() as u32, string.as_ptr()) {
+            if let Err(err) = sys::write(sys::STDIO, string.len() as u32, string.as_ptr()) {
                 panic!("stdio failed to write: {:?}", err);
             }
         }

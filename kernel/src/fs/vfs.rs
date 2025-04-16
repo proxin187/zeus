@@ -74,8 +74,18 @@ impl Descriptor for Stdio {
         Ok(())
     }
 
-    fn read(&mut self, _: u32) -> Result<Vec<u8>, Error> {
-        todo!("read from stdin");
+    fn read(&mut self, bytes: u32) -> Result<Vec<u8>, Error> {
+        let mut read: Vec<u8> = Vec::new();
+
+        loop {
+            if read.len() as u32 == bytes {
+                return Ok(read);
+            } else {
+                if let Some(byte) = unsafe { uart::UART.read() } {
+                    read.push(byte);
+                }
+            }
+        }
     }
 
     fn seek(&mut self, _: u32) {}
@@ -84,7 +94,7 @@ impl Descriptor for Stdio {
 pub struct Barrier;
 
 impl Descriptor for Barrier {
-    fn write(&mut self, bytes: &[u8]) -> Result<(), Error> {
+    fn write(&mut self, _: &[u8]) -> Result<(), Error> {
         Err(Error::Barrier)
     }
 

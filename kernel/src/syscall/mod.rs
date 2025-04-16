@@ -27,7 +27,7 @@ pub fn syscall(trapframe: &TrapFrame) {
     // a7: syscall number
     let syscall = Syscall::from(trapframe.regs[16]);
 
-    log!("syscall: {:?}", syscall);
+    // log!("syscall: {:?}", syscall);
 
     match syscall {
         Syscall::Write => {

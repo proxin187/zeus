@@ -1,10 +1,7 @@
-use crate::drivers::uart;
-use crate::log;
-
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use core::fmt::Write;
+use stdlib::{sys, print, println};
 
 
 pub struct Shell {
@@ -18,38 +15,33 @@ impl Shell {
         }
     }
 
-    fn command(&self) -> String {
-        // TODO: decide wether we port the rust std or make our own
+    fn readline(&self) -> String {
         let mut bytes: Vec<char> = Vec::new();
 
-        unsafe {
-            let _ = write!(uart::UART, "\n[shell]$ ");
-        }
+        print!("[proxin@proxin home]$ ");
 
         while !bytes.ends_with(&['\n']) && !bytes.ends_with(&['\r']) {
-            if let Some(byte) = unsafe { uart::UART.read() } {
-                unsafe {
-                    uart::UART.write(byte);
-                }
+            if let Ok(character) = unsafe { sys::read(sys::STDIO, 1).map(|ptr| *ptr as char) } {
+                print!("{}", character);
 
-                bytes.push(byte as char);
+                bytes.push(character);
             }
         }
+
+        print!("\n");
 
         bytes.iter().filter(|byte| **byte != '\r').collect()
     }
 
     pub fn run(&mut self) -> ! {
-        log!("welcome to dnb shell");
+        println!("[dnb] logged in with usermode");
 
         loop {
-            let command = self.command();
-
-            log!("command: {:?}", command);
+            let command = self.readline();
 
             match command.as_str() {
                 "help" => {
-                    log!("dnb shell, version 0.1");
+                    println!("[dnb] shell, version 0.1");
                 },
                 command => {
                 },
