@@ -9,6 +9,8 @@ use core::slice;
 pub enum Syscall {
     Write,
     Read,
+    Fork,
+    Execve,
     Exit,
 }
 
@@ -17,6 +19,8 @@ impl From<u64> for Syscall {
         match value {
             0 => Syscall::Write,
             1 => Syscall::Read,
+            57 => Syscall::Fork,
+            59 => Syscall::Execve,
             93 => Syscall::Exit,
             _ => panic!("unknown syscall: {}", value),
         }
@@ -61,8 +65,23 @@ pub fn syscall(trapframe: &TrapFrame) {
                 },
             }
         },
+        Syscall::Fork => {
+            // none -> a7: status
+
+            process::lock(|mut processes| processes.fork());
+
+            unsafe {
+                __trap_frame.regs[16] = 0;
+            }
+        },
+        Syscall::Execve => {
+            // TODO: test fork and implement execve, this is so that our shell can launch programs
+            // a6: path -> none
+        },
         Syscall::Exit => {
-            let context = process::exit();
+            // none -> none
+
+            let context = process::lock(|mut processes| processes.exit());
 
             unsafe {
                 __trap_frame = context.frame;

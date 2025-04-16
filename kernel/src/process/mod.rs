@@ -5,7 +5,7 @@ use alloc::string::{ToString, String};
 use alloc::vec::Vec;
 use alloc::vec;
 
-use spin::{Mutex, Lazy};
+use spin::{MutexGuard, Mutex, Lazy};
 
 
 pub static PROCESSES: Lazy<Mutex<Processes>> = Lazy::new(|| Mutex::new(Processes::new()));
@@ -93,6 +93,14 @@ impl Processes {
 
         self.processes[0].context.clone()
     }
+
+    pub fn fork(&mut self) {
+        let mut fork = Process::new(self.processes[0].name.clone(), State::Runable, self.processes[0].context.clone(), self.processes[0].stack.clone());
+
+        fork.context.frame.regs[16] = 1;
+
+        self.processes.push(fork);
+    }
 }
 
 pub fn spawn(name: &str, entry: u64) {
@@ -105,8 +113,8 @@ pub fn spawn(name: &str, entry: u64) {
     PROCESSES.lock().processes.push(process);
 }
 
-pub fn exit() -> Context {
-    PROCESSES.lock().exit()
+pub fn lock<T, F: Fn(MutexGuard<Processes>) -> T>(f: F) -> T {
+    f(PROCESSES.lock())
 }
 
 pub fn schedule(context: Context) -> Context {
