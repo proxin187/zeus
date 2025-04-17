@@ -99,6 +99,11 @@ impl Processes {
 
         fork.context.frame.regs[16] = 1;
 
+        fork.context.epc += 4;
+
+        // TODO: the issue of illegal instruction is now fixed, the problem now is that i think the
+        // addresses on the stack are invalid
+
         self.processes.push(fork);
     }
 }

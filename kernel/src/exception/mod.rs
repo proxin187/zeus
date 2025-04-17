@@ -159,6 +159,8 @@ pub unsafe extern "C" fn user_handle_trap(trapframe: &TrapFrame) {
             Exception::SyscallUser => {
                 syscall::syscall(trapframe);
 
+                // TODO: the problem is that we dont get this increment inside the child, we will
+                // have to manually add to the sepc of the child when forking
                 asm!(
                     "csrr a0, sepc",
                     "addi a0, a0, 4",

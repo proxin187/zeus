@@ -43,6 +43,21 @@ pub unsafe fn read(fd: u32, len: u32) -> Result<*const u8, Error> {
 }
 
 #[inline]
+pub unsafe fn fork() -> u32 {
+    unsafe {
+        let status: u32;
+
+        asm!(
+            "ecall",
+            in("a7") 57,
+            lateout("a7") status,
+        );
+
+        status
+    }
+}
+
+#[inline]
 pub unsafe fn exit() {
     unsafe {
         asm!(

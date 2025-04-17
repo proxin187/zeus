@@ -2,6 +2,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use stdlib::{sys, print, println};
+use stdlib::process::{self, Fork};
 
 
 pub struct Shell {
@@ -22,9 +23,18 @@ impl Shell {
 
         while !bytes.ends_with(&['\n']) && !bytes.ends_with(&['\r']) {
             if let Ok(character) = unsafe { sys::read(sys::STDIO, 1).map(|ptr| *ptr as char) } {
-                print!("{}", character);
+                match character {
+                    '\x7f' => {
+                        if let Some(_) = bytes.pop() {
+                            print!("\x1b[1D\x1b[J");
+                        }
+                    },
+                    _ => {
+                        print!("{}", character);
 
-                bytes.push(character);
+                        bytes.push(character);
+                    },
+                }
             }
         }
 
@@ -33,8 +43,30 @@ impl Shell {
         bytes.iter().filter(|byte| **byte != '\r').collect()
     }
 
+    fn spawn(&mut self, command: String) {
+        match process::fork() {
+            Fork::Parent => {
+                // TODO: we get here but it panics when trying to run the child
+                //
+                // it blames an illegal instruction which most likely means that we jump to an
+                // illegal instruction
+
+                println!("hello from parent");
+
+                loop {}
+            },
+            Fork::Child => {
+                // TODO: it panics before this
+
+                println!("hello from child");
+
+                loop {}
+            },
+        }
+    }
+
     pub fn run(&mut self) -> ! {
-        println!("[dnb] logged in with usermode");
+        println!("[dnb] FluxOS (0.1-flux-riscv64 tty)");
 
         loop {
             let command = self.readline();
@@ -43,7 +75,8 @@ impl Shell {
                 "help" => {
                     println!("[dnb] shell, version 0.1");
                 },
-                command => {
+                _ => {
+                    self.spawn(command);
                 },
             }
         }
