@@ -1,3 +1,5 @@
+mod loader;
+
 use crate::exception::TrapFrame;
 use crate::log;
 
@@ -112,8 +114,6 @@ pub fn spawn(name: &str, entry: u64) {
     let mut process = Process::new(name.to_string(), State::Runable, Context::new(TrapFrame::new(), entry), vec![0; 128 * 1024]);
 
     process.context.frame.regs[1] = process.stack.as_ptr_range().end as u64;
-
-    log!("spawn: {:?}", process);
 
     PROCESSES.lock().processes.push(process);
 }

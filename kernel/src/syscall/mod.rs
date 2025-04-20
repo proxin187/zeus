@@ -11,6 +11,7 @@ pub enum Syscall {
     Read,
     Fork,
     Execve,
+    Spawn,
     Exit,
 }
 
@@ -21,6 +22,7 @@ impl From<u64> for Syscall {
             1 => Syscall::Read,
             57 => Syscall::Fork,
             59 => Syscall::Execve,
+            60 => Syscall::Spawn,
             93 => Syscall::Exit,
             _ => panic!("unknown syscall: {}", value),
         }
@@ -77,6 +79,8 @@ pub fn syscall(trapframe: &TrapFrame) {
         Syscall::Execve => {
             // TODO: test fork and implement execve, this is so that our shell can launch programs
             // a6: path -> none
+        },
+        Syscall::Spawn => {
         },
         Syscall::Exit => {
             // none -> none

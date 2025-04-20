@@ -10,6 +10,7 @@ pub enum Error {
     NoSuchFd = 5,
     LimitedSpace = 6,
     Barrier = 7,
+    InvalidElf = 8,
 }
 
 impl Error {
@@ -22,6 +23,7 @@ impl Error {
             5 => Some(Error::NoSuchFd),
             6 => Some(Error::LimitedSpace),
             7 => Some(Error::Barrier),
+            8 => Some(Error::InvalidElf),
             _ => None,
         }
     }
@@ -37,6 +39,7 @@ impl core::fmt::Display for Error {
             Error::NoSuchFd => f.write_str("no such fd"),
             Error::LimitedSpace => f.write_str("limited space"),
             Error::Barrier => f.write_str("barrier"),
+            Error::InvalidElf => f.write_str("invalid elf"),
         }
     }
 }
