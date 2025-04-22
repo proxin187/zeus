@@ -17,7 +17,6 @@ mod drivers;
 mod process;
 mod syscall;
 mod memory;
-mod shell;
 mod cpu;
 mod fs;
 

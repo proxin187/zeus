@@ -1,8 +1,15 @@
+#![no_std]
+#![no_main]
+
+extern crate alloc;
+
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use stdlib::{sys, print, println};
 use stdlib::process::{self, Fork};
+
+// TODO: the panic handler can be a part of the standard library
 
 
 pub struct Shell {
@@ -84,7 +91,7 @@ impl Shell {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn entry() -> ! {
+pub unsafe extern "C" fn _entry() -> ! {
     let mut shell = Shell::new();
 
     shell.run()

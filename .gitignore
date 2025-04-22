@@ -1,4 +1,5 @@
 kernel/target
 mkfs/target
 stdlib/target
+utils/shell/target
 hdd.dsk

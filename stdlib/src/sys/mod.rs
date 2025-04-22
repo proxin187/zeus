@@ -58,6 +58,36 @@ pub unsafe fn fork() -> u32 {
 }
 
 #[inline]
+pub unsafe fn alloc(size: usize, align: usize) -> *mut u8 {
+    unsafe {
+        let addr: *mut u8;
+
+        asm!(
+            "ecall",
+            in("a7") 61,
+            in("a6") size,
+            in("a5") align,
+            lateout("a7") addr,
+        );
+
+        addr
+    }
+}
+
+#[inline]
+pub unsafe fn dealloc(size: usize, align: usize, addr: *mut u8) {
+    unsafe {
+        asm!(
+            "ecall",
+            in("a7") 62,
+            in("a6") size,
+            in("a5") align,
+            in("a4") addr,
+        );
+    }
+}
+
+#[inline]
 pub unsafe fn exit() {
     unsafe {
         asm!(

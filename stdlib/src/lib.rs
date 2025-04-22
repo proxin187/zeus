@@ -1,5 +1,8 @@
 #![no_std]
 
+#![cfg(feature = "allocator")]
+pub mod allocator;
+
 pub mod process;
 pub mod error;
 pub mod sys;

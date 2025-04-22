@@ -1,17 +1,19 @@
 use crate::exception::{__trap_frame, TrapFrame};
-use crate::{write_csr, log, process};
+use crate::{write_csr, process};
 use crate::fs::vfs;
+use crate::memory;
 
+use core::alloc::{GlobalAlloc, Layout};
 use core::slice;
 
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Syscall {
     Write,
     Read,
-    Fork,
-    Execve,
     Spawn,
+    Alloc,
+    Dealloc,
     Exit,
 }
 
@@ -20,9 +22,9 @@ impl From<u64> for Syscall {
         match value {
             0 => Syscall::Write,
             1 => Syscall::Read,
-            57 => Syscall::Fork,
-            59 => Syscall::Execve,
             60 => Syscall::Spawn,
+            61 => Syscall::Alloc,
+            62 => Syscall::Dealloc,
             93 => Syscall::Exit,
             _ => panic!("unknown syscall: {}", value),
         }
@@ -67,20 +69,29 @@ pub fn syscall(trapframe: &TrapFrame) {
                 },
             }
         },
-        Syscall::Fork => {
-            // none -> a7: status
-
-            process::lock(|mut processes| processes.fork());
-
-            unsafe {
-                __trap_frame.regs[16] = 0;
-            }
-        },
-        Syscall::Execve => {
-            // TODO: test fork and implement execve, this is so that our shell can launch programs
-            // a6: path -> none
-        },
         Syscall::Spawn => {
+        },
+        Syscall::Alloc | Syscall::Dealloc => {
+            match Layout::from_size_align(trapframe.regs[15] as usize, trapframe.regs[14] as usize) {
+                Ok(layout) => {
+                    unsafe {
+                        if syscall == Syscall::Alloc {
+                            // a6: size, a5: align -> a7: addr
+
+                            __trap_frame.regs[16] = memory::ALLOC.alloc(layout) as u64;
+                        } else {
+                            // a6: size, a5: align, a4: addr -> none
+
+                            memory::ALLOC.dealloc(trapframe.regs[13] as *mut u8, layout);
+                        }
+                    }
+                },
+                Err(_) => {
+                    unsafe {
+                        __trap_frame.regs[16] = 0;
+                    }
+                },
+            }
         },
         Syscall::Exit => {
             // none -> none
