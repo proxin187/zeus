@@ -9,8 +9,6 @@ use alloc::vec::Vec;
 use stdlib::{sys, print, println};
 use stdlib::process::{self, Fork};
 
-// TODO: the panic handler can be a part of the standard library
-
 
 pub struct Shell {
     cwd: [u8; 56],

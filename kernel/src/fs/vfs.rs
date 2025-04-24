@@ -19,6 +19,11 @@ trait Descriptor {
     fn write(&mut self, bytes: &[u8]) -> Result<(), Error>;
     fn read(&mut self, bytes: u32) -> Result<Vec<u8>, Error>;
     fn seek(&mut self, offset: u32);
+    fn metadata(&self) -> Result<Metadata, Error>;
+}
+
+pub struct Metadata {
+    len: u32,
 }
 
 pub struct Fd {
@@ -58,6 +63,9 @@ impl Descriptor for Fd {
 
     fn seek(&mut self, offset: u32) {
         self.offset = offset;
+    }
+
+    fn metadata(&self) -> Result<Metadata, Error> {
     }
 }
 

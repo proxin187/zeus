@@ -31,6 +31,7 @@ pub struct Cluster {
 pub struct DirEntry {
     name: [u8; 56],
     addr: Option<u32>,
+    len: u32,
 }
 
 pub struct Mkfs<'a> {
@@ -96,6 +97,7 @@ impl<'a> Mkfs<'a> {
             self.entries.push(DirEntry {
                 name: name.try_into().map_err(|_| Into::<Box<dyn std::error::Error>>::into("failed to convert"))?,
                 addr: None,
+                len: 0,
             });
 
             self.make(absolute)
@@ -105,6 +107,7 @@ impl<'a> Mkfs<'a> {
             self.entries.push(DirEntry {
                 name: name.try_into().map_err(|_| Into::<Box<dyn std::error::Error>>::into("failed to convert"))?,
                 addr: Some(cluster),
+                len: metadata.len() as u32,
             });
 
             Ok(())

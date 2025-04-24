@@ -66,10 +66,11 @@ impl Cluster {
 }
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DirEntry {
     name: [u8; 56],
     addr: Option<u32>,
+    len: u32,
 }
 
 pub struct Blocks {
@@ -143,7 +144,7 @@ impl ZMap {
 pub struct Fs {
     zmap: ZMap,
     blocks: Blocks,
-    cache: BTreeMap<[u8; 56], Option<u32>>,
+    cache: BTreeMap<[u8; 56], DirEntry>,
 }
 
 impl Fs {
@@ -172,6 +173,14 @@ impl Fs {
         }
     }
 
+    fn read_entry(&mut self, index: usize) -> DirEntry {
+        let offset = index * mem::size_of::<DirEntry>();
+        let block = self.blocks.read(offset as u64 / 512);
+
+        decode!(&block[offset % 512..(offset % 512) + mem::size_of::<DirEntry>()])
+    }
+
+    /*
     fn cache(&mut self, block: &[u8]) {
         for chunk in block.chunks(mem::size_of::<DirEntry>()) {
             if chunk.iter().all(|byte| *byte == 0) {
@@ -181,6 +190,7 @@ impl Fs {
 
                 log!("entry: {:?}", entry);
 
+                // TODO: we will have to 
                 self.cache.insert(entry.name, entry.addr);
 
                 if let Some(zone) = entry.addr {
@@ -195,14 +205,29 @@ impl Fs {
             }
         }
     }
+    */
 
     fn load(&mut self, header: Header) {
         log!("loading entries={}, sectors={}", header.entries, 1 + header.entries * mem::size_of::<DirEntry>() as u32 / 512);
 
-        for sector in 0..1 + header.entries * mem::size_of::<DirEntry>() as u32 / 512 {
-            let block = self.blocks.read(1 + sector as u64);
+        for entry in 0..header.entries {
+            // let block = self.blocks.read(1 + sector as u64);
 
-            self.cache(&block);
+            // self.cache(&block);
+
+            let entry = self.read_entry(entry as usize);
+
+            log!("entry: {:?}", entry);
+
+            self.cache.insert(entry.name, entry.clone());
+
+            if let Some(zone) = entry.addr {
+                self.zmap.set(zone, true);
+
+                let cluster = decode!(&self.blocks.read(zone as u64));
+
+                self.cache_cluster(cluster);
+            }
         }
     }
 
@@ -320,8 +345,8 @@ impl Fs {
 
     fn query(&self, path: [u8; 56]) -> Result<u32, Error> {
         match self.cache.get(&path) {
-            Some(addr) => match addr {
-                Some(addr) => Ok(*addr),
+            Some(entry) => match entry.addr {
+                Some(addr) => Ok(addr),
                 None => Err(Error::ExpectedFile),
             },
             None => Err(Error::InvalidPath),
