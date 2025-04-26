@@ -1,7 +1,7 @@
 use crate::drivers::virtio::blk::VirtioBlk;
 use crate::drivers::uart;
 
-use super::{Fs, FS};
+use super::{DirEntry, Fs, FS};
 
 use core::cell::OnceCell;
 
@@ -23,7 +23,11 @@ trait Descriptor {
 }
 
 pub struct Metadata {
-    len: u32,
+    entry: DirEntry,
+}
+
+impl Metadata {
+    pub fn len(&self) -> u32 { self.entry.len }
 }
 
 pub struct Fd {

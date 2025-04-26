@@ -210,16 +210,16 @@ impl Fs {
     fn load(&mut self, header: Header) {
         log!("loading entries={}, sectors={}", header.entries, 1 + header.entries * mem::size_of::<DirEntry>() as u32 / 512);
 
-        for entry in 0..header.entries {
+        for index in 0..header.entries {
             // let block = self.blocks.read(1 + sector as u64);
 
             // self.cache(&block);
 
-            let entry = self.read_entry(entry as usize);
+            let entry = self.read_entry(index as usize);
 
             log!("entry: {:?}", entry);
 
-            self.cache.insert(entry.name, entry.clone());
+            self.cache.insert(entry.name, index);
 
             if let Some(zone) = entry.addr {
                 self.zmap.set(zone, true);
@@ -363,6 +363,8 @@ impl Fs {
     pub fn write(&mut self, path: [u8; 56], offset: u32, data: &[u8]) -> Result<(), Error> {
         let addr = self.query(path)?;
         let block = self.blocks.read(addr as u64);
+
+        // TODO: we have to update the entry with the new length
 
         self.write_cluster(decode!(&block), addr, offset, data)
     }
