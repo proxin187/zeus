@@ -68,7 +68,7 @@ impl Cluster {
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct DirEntry {
-    name: [u8; 56],
+    name: [u8; 116],
     addr: Option<u32>,
     len: u32,
 }
@@ -144,7 +144,7 @@ impl ZMap {
 pub struct Fs {
     zmap: ZMap,
     blocks: Blocks,
-    cache: BTreeMap<[u8; 56], DirEntry>,
+    cache: BTreeMap<[u8; 116], u32>,
 }
 
 impl Fs {
@@ -167,54 +167,21 @@ impl Fs {
         while let Some(addr) = cluster.next {
             self.zmap.set(addr, true);
 
-            log!("zone: {}", addr);
-
             cluster = decode!(&self.blocks.read(addr as u64));
         }
     }
 
     fn read_entry(&mut self, index: usize) -> DirEntry {
         let offset = index * mem::size_of::<DirEntry>();
-        let block = self.blocks.read(offset as u64 / 512);
+        let block = self.blocks.read((offset as u64 / 512) + 1);
 
         decode!(&block[offset % 512..(offset % 512) + mem::size_of::<DirEntry>()])
     }
-
-    /*
-    fn cache(&mut self, block: &[u8]) {
-        for chunk in block.chunks(mem::size_of::<DirEntry>()) {
-            if chunk.iter().all(|byte| *byte == 0) {
-                break;
-            } else {
-                let entry: DirEntry = decode!(chunk);
-
-                log!("entry: {:?}", entry);
-
-                // TODO: we will have to 
-                self.cache.insert(entry.name, entry.addr);
-
-                if let Some(zone) = entry.addr {
-                    self.zmap.set(zone, true);
-
-                    log!("zone: {}", zone);
-
-                    let cluster = decode!(&self.blocks.read(zone as u64));
-
-                    self.cache_cluster(cluster);
-                }
-            }
-        }
-    }
-    */
 
     fn load(&mut self, header: Header) {
         log!("loading entries={}, sectors={}", header.entries, 1 + header.entries * mem::size_of::<DirEntry>() as u32 / 512);
 
         for index in 0..header.entries {
-            // let block = self.blocks.read(1 + sector as u64);
-
-            // self.cache(&block);
-
             let entry = self.read_entry(index as usize);
 
             log!("entry: {:?}", entry);
@@ -328,40 +295,31 @@ impl Fs {
         // TODO: implement a defragmentation algorithm to prevent excessive fragmentation
     }
 
-    fn dump_cluster(&mut self, mut cluster: Cluster) {
-        loop {
-            log!("cluster: {:?}", cluster);
-
-            match cluster.next {
-                Some(next) => {
-                    cluster = decode!(&self.blocks.read(next as u64));
-                },
-                None => {
-                    break;
-                },
-            }
-        }
-    }
-
-    fn query(&self, path: [u8; 56]) -> Result<u32, Error> {
+    fn query(&mut self, path: [u8; 116]) -> Result<DirEntry, Error> {
         match self.cache.get(&path) {
-            Some(entry) => match entry.addr {
-                Some(addr) => Ok(addr),
-                None => Err(Error::ExpectedFile),
-            },
+            Some(entry) => Ok(self.read_entry(*entry as usize)),
             None => Err(Error::InvalidPath),
         }
     }
 
-    pub fn read(&mut self, path: [u8; 56], range: Range<u32>) -> Result<Vec<u8>, Error> {
-        let addr = self.query(path)?;
+    fn query_cluster(&mut self, path: [u8; 116]) -> Result<u32, Error> {
+        let entry = self.query(path)?;
+
+        match entry.addr {
+            Some(addr) => Ok(addr),
+            None => Err(Error::ExpectedFile),
+        }
+    }
+
+    pub fn read(&mut self, path: [u8; 116], range: Range<u32>) -> Result<Vec<u8>, Error> {
+        let addr = self.query_cluster(path)?;
         let block = self.blocks.read(addr as u64);
 
         self.read_cluster(decode!(&block), range)
     }
 
-    pub fn write(&mut self, path: [u8; 56], offset: u32, data: &[u8]) -> Result<(), Error> {
-        let addr = self.query(path)?;
+    pub fn write(&mut self, path: [u8; 116], offset: u32, data: &[u8]) -> Result<(), Error> {
+        let addr = self.query_cluster(path)?;
         let block = self.blocks.read(addr as u64);
 
         // TODO: we have to update the entry with the new length
@@ -377,10 +335,6 @@ impl Fs {
 
     pub fn list(&mut self, path: &str) {
     }
-}
-
-pub fn init(block: VirtioBlk) {
-    FS.lock().get_or_init(|| Fs::new(block));
 }
 
 

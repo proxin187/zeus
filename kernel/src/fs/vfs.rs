@@ -31,12 +31,12 @@ impl Metadata {
 }
 
 pub struct Fd {
-    name: [u8; 56],
+    name: [u8; 116],
     offset: u32,
 }
 
 impl Fd {
-    pub fn new(name: [u8; 56], offset: u32) -> Fd {
+    pub fn new(name: [u8; 116], offset: u32) -> Fd {
         Fd {
             name,
             offset,
@@ -70,6 +70,12 @@ impl Descriptor for Fd {
     }
 
     fn metadata(&self) -> Result<Metadata, Error> {
+        let mut lock = FS.lock();
+        let fs = lock.get_mut().expect("uninitialized file system");
+
+        Ok(Metadata {
+            entry: fs.query(self.name)?,
+        })
     }
 }
 
@@ -101,6 +107,10 @@ impl Descriptor for Stdio {
     }
 
     fn seek(&mut self, _: u32) {}
+
+    fn metadata(&self) -> Result<Metadata, Error> {
+        Err(Error::NoMetadata)
+    }
 }
 
 pub struct Barrier;
@@ -115,6 +125,10 @@ impl Descriptor for Barrier {
     }
 
     fn seek(&mut self, _: u32) {}
+
+    fn metadata(&self) -> Result<Metadata, Error> {
+        Err(Error::NoMetadata)
+    }
 }
 
 pub struct Vfs {
@@ -134,7 +148,7 @@ impl Vfs {
         }
     }
 
-    pub fn open(&mut self, name: [u8; 56]) -> Result<u32, Error> {
+    pub fn open(&mut self, name: [u8; 116]) -> Result<u32, Error> {
         let fd = self.descriptors.iter()
             .map_windows(|[(a, _), (b, _)]| (**a != *b - 1).then(|| *b - 1))
             .flatten()
@@ -144,6 +158,10 @@ impl Vfs {
         self.descriptors.insert(fd, Box::new(Fd::new(name, 0)));
 
         Ok(fd)
+    }
+
+    pub fn close(&mut self, fd: u32) {
+        self.descriptors.remove(&fd);
     }
 
     pub fn seek(&mut self, fd: u32, offset: u32) -> Result<(), Error> {
@@ -167,6 +185,13 @@ impl Vfs {
     pub fn write(&mut self, fd: u32, bytes: &[u8]) -> Result<(), Error> {
         match self.descriptors.get_mut(&fd) {
             Some(descriptor) => descriptor.write(bytes),
+            None => Err(Error::NoSuchFd),
+        }
+    }
+
+    pub fn metadata(&self, fd: u32) -> Result<Metadata, Error> {
+        match self.descriptors.get(&fd) {
+            Some(descriptor) => descriptor.metadata(),
             None => Err(Error::NoSuchFd),
         }
     }

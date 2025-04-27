@@ -38,18 +38,7 @@ pub unsafe fn memset(buf: *mut u8, value: u8, count: usize) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn init_proc() {
-    loop {
-        log!("test");
-
-        for _ in 0..1000000 {}
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn proc2() {
-    log!("exiting proc2");
-
+pub unsafe extern "C" fn init() {
     asm!(
         "li a0, 1",
         "li a7, 93",
@@ -82,12 +71,7 @@ pub unsafe fn kmain() -> ! {
         },
     }
 
-    /*
-    process::spawn("init", init_proc as u64);
-    process::spawn("proc2", proc2 as u64);
-    */
-
-    process::spawn("shell", shell::entry as u64);
+    process::spawn("init", init as u64);
 
     exception::enter_user();
 

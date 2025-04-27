@@ -1,7 +1,6 @@
-mod loader;
+pub mod loader;
 
 use crate::exception::TrapFrame;
-use crate::log;
 
 use alloc::string::{ToString, String};
 use alloc::vec::Vec;

@@ -27,9 +27,9 @@ pub struct Cluster {
 }
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DirEntry {
-    name: [u8; 56],
+    name: [u8; 116],
     addr: Option<u32>,
     len: u32,
 }
@@ -74,8 +74,6 @@ impl<'a> Mkfs<'a> {
                 data: chunk.try_into().map_err(|_| Into::<Box<dyn std::error::Error>>::into("failed to convert"))?,
             };
 
-            println!("cluster: cluster={:?}, addr={:?}", cluster, self.cluster as u64 * 512);
-
             self.file.write_at(encode!(&cluster), self.cluster as u64 * 512)?;
 
             self.cluster += 1;
@@ -91,7 +89,7 @@ impl<'a> Mkfs<'a> {
 
         let mut name = relative.as_bytes().to_vec();
 
-        name.resize(56, 0);
+        name.resize(116, 0);
 
         if metadata.is_dir() {
             self.entries.push(DirEntry {

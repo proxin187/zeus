@@ -11,6 +11,7 @@ pub enum Error {
     LimitedSpace = 6,
     Barrier = 7,
     InvalidElf = 8,
+    NoMetadata = 9,
 }
 
 impl Error {
@@ -24,6 +25,7 @@ impl Error {
             6 => Some(Error::LimitedSpace),
             7 => Some(Error::Barrier),
             8 => Some(Error::InvalidElf),
+            9 => Some(Error::NoMetadata),
             _ => None,
         }
     }
@@ -40,6 +42,7 @@ impl core::fmt::Display for Error {
             Error::LimitedSpace => f.write_str("limited space"),
             Error::Barrier => f.write_str("barrier"),
             Error::InvalidElf => f.write_str("invalid elf"),
+            Error::NoMetadata => f.write_str("no metadata"),
         }
     }
 }

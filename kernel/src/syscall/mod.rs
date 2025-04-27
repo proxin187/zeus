@@ -1,6 +1,7 @@
 use crate::exception::{__trap_frame, TrapFrame};
-use crate::{write_csr, process};
+use crate::process::loader::Loader;
 use crate::fs::vfs;
+use crate::{write_csr, process};
 use crate::memory;
 
 use core::alloc::{GlobalAlloc, Layout};
@@ -11,6 +12,7 @@ use core::slice;
 pub enum Syscall {
     Write,
     Read,
+    Metadata,
     Spawn,
     Alloc,
     Dealloc,
@@ -22,6 +24,7 @@ impl From<u64> for Syscall {
         match value {
             0 => Syscall::Write,
             1 => Syscall::Read,
+            13 => Syscall::Metadata,
             60 => Syscall::Spawn,
             61 => Syscall::Alloc,
             62 => Syscall::Dealloc,
@@ -69,7 +72,29 @@ pub fn syscall(trapframe: &TrapFrame) {
                 },
             }
         },
+        Syscall::Metadata => {
+            // TODO: implement support for metadata syscall
+        },
         Syscall::Spawn => {
+            // a6: path, a5: length, a4: args -> a7: pid
+
+            let mut path = unsafe { slice::from_raw_parts(trapframe.regs[15] as *const u8, trapframe.regs[14] as usize).to_vec() };
+
+            path.resize(116, 0);
+
+            let name = path.try_into().expect("internal error");
+
+            let bytes = vfs::lock(|vfs| {
+                let fd = vfs.open(name)?;
+
+                let metadata = vfs.metadata(fd)?;
+
+                let bytes = vfs.read(fd, metadata.len());
+
+                vfs.close(fd);
+
+                Ok(bytes)
+            });
         },
         Syscall::Alloc | Syscall::Dealloc => {
             match Layout::from_size_align(trapframe.regs[15] as usize, trapframe.regs[14] as usize) {
