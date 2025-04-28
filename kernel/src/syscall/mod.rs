@@ -84,7 +84,7 @@ pub fn syscall(trapframe: &TrapFrame) {
 
             let name = path.try_into().expect("internal error");
 
-            let bytes = vfs::lock(|vfs| {
+            let result = vfs::lock(|vfs| {
                 let fd = vfs.open(name)?;
 
                 let metadata = vfs.metadata(fd)?;
@@ -93,8 +93,34 @@ pub fn syscall(trapframe: &TrapFrame) {
 
                 vfs.close(fd);
 
-                Ok(bytes)
+                bytes
             });
+
+            // TODO: wrap this entire function around another function so that we can either return
+            // a status or an error
+
+            let bytes = match result {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                },
+            };
+
+            if let Err(err) = result.and_then(|bytes| Loader::new(&bytes)) {
+            }
+
+            match result {
+                Ok(bytes) => match Loader::new(&bytes) {
+                    Ok(loader) => {
+                    },
+                    Err(err) => {
+                    },
+                },
+                Err(err) => {
+                    unsafe {
+                        __trap_frame.regs[16] = err as u64;
+                    }
+                },
+            }
         },
         Syscall::Alloc | Syscall::Dealloc => {
             match Layout::from_size_align(trapframe.regs[15] as usize, trapframe.regs[14] as usize) {
