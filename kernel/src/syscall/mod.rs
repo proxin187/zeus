@@ -7,6 +7,8 @@ use crate::memory;
 use core::alloc::{GlobalAlloc, Layout};
 use core::slice;
 
+use stdlib::error::Error;
+
 
 #[derive(Debug, PartialEq)]
 pub enum Syscall {
@@ -34,7 +36,7 @@ impl From<u64> for Syscall {
     }
 }
 
-pub fn syscall(trapframe: &TrapFrame) {
+fn perfom(trapframe: &TrapFrame) -> Result<(), Error> {
     // a7: syscall number
     let syscall = Syscall::from(trapframe.regs[16]);
 
@@ -44,36 +46,35 @@ pub fn syscall(trapframe: &TrapFrame) {
         Syscall::Write => {
             // a6: fd, a5: len, a4: addr -> a7: status
 
-            let status = vfs::lock(|vfs| {
+            vfs::lock(|vfs| {
                 let bytes = unsafe { slice::from_raw_parts(trapframe.regs[13] as *const u8, trapframe.regs[14] as usize) };
 
                 vfs.write(trapframe.regs[15] as u32, bytes)
-            });
+            })?;
 
             unsafe {
-                __trap_frame.regs[16] = status.map_err(|err| err as u64).err().unwrap_or(0);
+                __trap_frame.regs[16] = 0;
             }
+
+            Ok(())
         },
         Syscall::Read => {
             // a6: fd, a5: len -> a7: status, a6: addr
 
-            match vfs::lock(|vfs| vfs.read(trapframe.regs[15] as u32, trapframe.regs[14] as u32)) {
-                Ok(bytes) => {
-                    unsafe {
-                        __trap_frame.regs[16] = 0;
+            let bytes = vfs::lock(|vfs| vfs.read(trapframe.regs[15] as u32, trapframe.regs[14] as u32))?;
 
-                        __trap_frame.regs[15] = bytes.leak() as *mut [u8] as *const u8 as u64;
-                    }
-                },
-                Err(err) => {
-                    unsafe {
-                        __trap_frame.regs[16] = err as u64;
-                    }
-                },
+            unsafe {
+                __trap_frame.regs[16] = 0;
+
+                __trap_frame.regs[15] = bytes.leak() as *mut [u8] as *const u8 as u64;
             }
+
+            Ok(())
         },
         Syscall::Metadata => {
             // TODO: implement support for metadata syscall
+
+            Ok(())
         },
         Syscall::Spawn => {
             // a6: path, a5: length, a4: args -> a7: pid
@@ -84,7 +85,7 @@ pub fn syscall(trapframe: &TrapFrame) {
 
             let name = path.try_into().expect("internal error");
 
-            let result = vfs::lock(|vfs| {
+            let bytes = vfs::lock(|vfs| {
                 let fd = vfs.open(name)?;
 
                 let metadata = vfs.metadata(fd)?;
@@ -94,33 +95,16 @@ pub fn syscall(trapframe: &TrapFrame) {
                 vfs.close(fd);
 
                 bytes
-            });
+            })?;
 
             // TODO: wrap this entire function around another function so that we can either return
             // a status or an error
 
-            let bytes = match result {
-                Ok(bytes) => bytes,
-                Err(err) => {
-                },
-            };
+            let mut loader = Loader::new(&bytes)?;
 
-            if let Err(err) = result.and_then(|bytes| Loader::new(&bytes)) {
-            }
+            loader.load_memory();
 
-            match result {
-                Ok(bytes) => match Loader::new(&bytes) {
-                    Ok(loader) => {
-                    },
-                    Err(err) => {
-                    },
-                },
-                Err(err) => {
-                    unsafe {
-                        __trap_frame.regs[16] = err as u64;
-                    }
-                },
-            }
+            Ok(())
         },
         Syscall::Alloc | Syscall::Dealloc => {
             match Layout::from_size_align(trapframe.regs[15] as usize, trapframe.regs[14] as usize) {
@@ -136,12 +120,10 @@ pub fn syscall(trapframe: &TrapFrame) {
                             memory::ALLOC.dealloc(trapframe.regs[13] as *mut u8, layout);
                         }
                     }
+
+                    Ok(())
                 },
-                Err(_) => {
-                    unsafe {
-                        __trap_frame.regs[16] = 0;
-                    }
-                },
+                Err(_) => Err(Error::InvalidLayout),
             }
         },
         Syscall::Exit => {
@@ -154,7 +136,17 @@ pub fn syscall(trapframe: &TrapFrame) {
             }
 
             write_csr!("sepc", context.epc - 4);
+
+            Ok(())
         },
+    }
+}
+
+pub fn syscall(trapframe: &TrapFrame) {
+    if let Err(err) = perfom(trapframe) {
+        unsafe {
+            __trap_frame.regs[16] = err as u64;
+        }
     }
 }
 

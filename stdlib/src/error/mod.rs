@@ -12,6 +12,7 @@ pub enum Error {
     Barrier = 7,
     InvalidElf = 8,
     NoMetadata = 9,
+    InvalidLayout = 10,
 }
 
 impl Error {
@@ -26,6 +27,7 @@ impl Error {
             7 => Some(Error::Barrier),
             8 => Some(Error::InvalidElf),
             9 => Some(Error::NoMetadata),
+            10 => Some(Error::InvalidLayout),
             _ => None,
         }
     }
@@ -43,6 +45,7 @@ impl core::fmt::Display for Error {
             Error::Barrier => f.write_str("barrier"),
             Error::InvalidElf => f.write_str("invalid elf"),
             Error::NoMetadata => f.write_str("no metadata"),
+            Error::InvalidLayout => f.write_str("invalid layout"),
         }
     }
 }
