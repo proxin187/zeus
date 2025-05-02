@@ -1,6 +1,9 @@
 use crate::log;
 
 use alloc::vec::Vec;
+use alloc::vec;
+
+use core::ops::Range;
 
 use elf::section::SectionHeader;
 use elf::segment::ProgramHeader;
@@ -10,11 +13,23 @@ use elf::ElfBytes;
 use stdlib::error::Error;
 
 
+// TODO: maybe this will have to be stored in the process structure?
 pub struct Program {
+    addr: u64,
     program: Vec<u8>,
 }
 
 impl Program {
+    pub fn new(range: Range<u64>) -> Program {
+        Program {
+            addr: range.start,
+            program: vec![0; range.end as usize - range.start as usize],
+        }
+    }
+
+    pub fn insert(&mut self, bytes: &[u8]) {
+        self.program.copy_from_slice(bytes);
+    }
 }
 
 pub enum Data {
@@ -23,6 +38,26 @@ pub enum Data {
 }
 
 impl Data {
+    pub fn addr(&self) -> u64 {
+        match self {
+            Data::Segment(header) => header.p_vaddr,
+            Data::Section(section) => section.sh_addr,
+        }
+    }
+
+    pub fn size(&self) -> u64 {
+        match self {
+            Data::Segment(header) => header.p_memsz,
+            Data::Section(section) => section.sh_size,
+        }
+    }
+
+    pub fn bytes<'a>(&self, elf: ElfBytes<'a, AnyEndian>) -> Result<&[u8], Error> {
+        match self {
+            Data::Segment(header) => elf.segment_data(header),
+            Data::Section(section) => section.sh_size,
+        }
+    }
 }
 
 pub struct Loader<'a> {
@@ -42,13 +77,11 @@ impl<'a> Loader<'a> {
 
         Ok(Loader {
             elf,
-            data: ,
+            data: [segments, sections].into_iter().flatten().collect(),
         })
     }
 
-    fn range(&self) {
-    }
-
+    /*
     fn load_segments(&self) -> Result<(), > {
         if let Some(segments) = self.elf.segments() {
             for segment in segments {
@@ -70,9 +103,18 @@ impl<'a> Loader<'a> {
             }
         }
     }
+    */
 
-    pub fn load_memory(&mut self) {
-        // TODO: we need to load both segments and headers into memory
+    pub fn load(&mut self) -> Result<Program, Error> {
+        let min = self.data.iter().map(|data| data.addr()).min().unwrap_or(0);
+        let max = self.data.iter().map(|data| data.addr() + data.size()).max().unwrap_or(0);
+
+        let mut program = Program::new(min..max);
+
+        for data in self.data.iter() {
+        }
+
+        Ok(program)
     }
 }
 
